@@ -1,0 +1,14 @@
+.env
+.secrets/
+.budget.json
+data/crm.sqlite
+data/runtime/
+eval/results/traces/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.vscode/
+.idea/
+.DS_Store
+scratchpad/

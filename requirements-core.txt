@@ -1,0 +1,8 @@
+pydantic>=2.7
+openai>=1.40
+anthropic>=0.40
+fastapi>=0.115
+uvicorn>=0.30
+gradio>=5.0
+rank-bm25>=0.2.2
+faker>=30.0
