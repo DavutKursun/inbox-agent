@@ -32,7 +32,7 @@ twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clie
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env                 # free Groq/Cerebras key; no paid API needed
-python scripts/make_fixtures.py      # 200 fictional customers, calendar, 6 sample emails
+python scripts/make_fixtures.py --today 2026-10-19   # seeded + dated; the committed fixtures use this date
 python scripts/run_one.py data/samples/booking.json
 pytest -q
 ```

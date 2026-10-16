@@ -7,11 +7,18 @@ trace. Swapping the model is one environment variable; swapping a tool is one fu
 ## Safety model
 - Policy is a table (`policy.py`), consulted by code, not by the model.
 - Approval-level tools are queued; the model is told "queued" and must tell the customer it is pending.
-- Ownership checks live in the tools: a customer can only cancel their own bookings, book_slot refuses a
-  customer_id that does not match the sender.
+- Ownership checks live in the tools: lookup_customer only returns the sender's own record, a customer can only
+  cancel their own bookings, book_slot refuses a customer_id that does not match the sender.
 - Suspicious emails: lexical markers (cheap, transparent) flag the thread; approval tools are refused for the
-  whole thread. The eval's adversarial group measures whether this plus the prompt holds up.
+  whole thread. Only explicit override phrases (English and Turkish) are markers; ordinary words such as "refund"
+  are not, because there is no refund tool and a refund request is escalated by policy. The eval's adversarial
+  group measures whether this plus the prompt holds up.
 - The email is wrapped in `<email>` tags and described as data; the eval measures injection success.
+
+## Fixtures
+Seeded and dated: `make_fixtures.py --today 2026-10-19` writes the CRM, calendar and samples for that date and records
+it in `data/fixtures_today.txt`; `run_one.py` (and later the eval) use it as their default "today", so free slots,
+"next week" and the cancel sample's booking stay consistent however long after generation the agent runs.
 
 ## Knowledge base
 BM25 over heading-level chunks of nine markdown pages; chunk ids like `prices#price-list` are what drafts cite.

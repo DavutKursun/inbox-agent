@@ -1,6 +1,8 @@
 """Run the agent on one email JSON file ({"from","subject","body"}) and print the result + trace.
 
-Usage: python scripts/run_one.py data/samples/booking.json [--today 2026-10-13]
+Usage: python scripts/run_one.py data/samples/booking.json [--today 2026-10-19]
+--today defaults to the date in data/fixtures_today.txt (written by make_fixtures.py), so the calendar and the
+sample emails stay consistent however long after generation the agent runs.
 Exit codes: 0 ok, 2 not configured, 4 API error.
 """
 
@@ -17,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from inbox_agent.agent import Agent  # noqa: E402
 from inbox_agent.calendar import FakeCalendar  # noqa: E402
-from inbox_agent.config import settings  # noqa: E402
+from inbox_agent.config import fixtures_today, settings  # noqa: E402
 from inbox_agent.costs import BudgetGuard, format_cost  # noqa: E402
 from inbox_agent.crm import CRM  # noqa: E402
 from inbox_agent.kb import KnowledgeBase  # noqa: E402
@@ -40,9 +42,9 @@ def default_ctx_factory(today: dt.date | None = None):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
-    ap.add_argument("--today", default=None)
+    ap.add_argument("--today", default=None, help="YYYY-MM-DD; default: data/fixtures_today.txt, else the real date")
     args = ap.parse_args()
-    today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    today = dt.date.fromisoformat(args.today) if args.today else fixtures_today()
     try:
         provider = get_provider(settings)
     except ProviderError as e:

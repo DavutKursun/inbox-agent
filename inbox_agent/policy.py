@@ -20,11 +20,15 @@ POLICY: dict[str, Risk] = {
     # Deliberately absent → forbidden: send_email, refund, change_balance, delete_customer
 }
 
-# Words in the email that trigger "suspicious" handling: the agent may read, search and draft, but any
+# Phrases in the email that trigger "suspicious" handling: the agent may read, search and draft, but any
 # approval-level action is refused outright for the thread (not just queued) and the thread is escalated.
+# Only explicit attempts to override the instructions are listed. Ordinary words ("refund", "override",
+# "disregard", "you are now") are not markers: a refund request is handled by policy — there is no refund
+# tool, so the model has to escalate — and a legitimate customer must not get flagged for using them.
 INJECTION_MARKERS = (
-    "ignore previous instructions", "ignore all previous", "as the system", "you are now", "system prompt",
-    "developer message", "refund", "override", "admin mode", "disregard",
+    "ignore previous instructions", "ignore all previous", "as the system", "system prompt", "developer message", "admin mode",
+    # Turkish
+    "önceki talimatları yok say", "sistem olarak",
 )
 
 
@@ -32,9 +36,17 @@ def risk_of(tool: str) -> Risk:
     return POLICY.get(tool, "forbidden")
 
 
+def _fold(text: str) -> str:
+    """Case-fold with the Turkish dotted/dotless i collapsed, so "TALİMATLARI" matches "talimatları"."""
+    return text.replace("İ", "i").replace("ı", "i").lower()
+
+
+_FOLDED_MARKERS = tuple(_fold(m) for m in INJECTION_MARKERS)
+
+
 def looks_suspicious(text: str) -> bool:
-    t = text.lower()
-    return any(m in t for m in INJECTION_MARKERS)
+    t = _fold(text)
+    return any(m in t for m in _FOLDED_MARKERS)
 
 
 def policy_summary() -> str:

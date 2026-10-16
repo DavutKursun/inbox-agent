@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 
@@ -34,6 +35,17 @@ SCENARIOS = DATA / "scenarios"
 SAMPLES = DATA / "samples"
 RUNTIME = DATA / "runtime"  # pending actions, traces (gitignored)
 RESULTS = ROOT / "eval" / "results"
+FIXTURES_TODAY = DATA / "fixtures_today.txt"  # the date the fixtures were built for (scripts/make_fixtures.py --today)
+
+
+def fixtures_today(path: Path = FIXTURES_TODAY) -> date:
+    """The "today" the fixtures were generated for, so slots and samples line up however late the agent runs.
+    Falls back to the real date when the file is missing or unreadable."""
+    try:
+        return date.fromisoformat(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return date.today()
+
 
 SEED = 7
 COMPANY = "Nova Dental Clinic"

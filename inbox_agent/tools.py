@@ -49,6 +49,8 @@ class Tool:
 
 # --- implementations --------------------------------------------------------------
 def _lookup_customer(a: LookupCustomerArgs, ctx: Context):
+    if a.email.lower() != ctx.customer_email.lower():  # the sender's own record only: no browsing other customers
+        return {"error": "can only look up the sender"}
     rec = ctx.crm.lookup(a.email)
     if rec is None:
         return {"found": False}
@@ -106,7 +108,7 @@ def _finish(a: FinishArgs, ctx: Context):
 
 
 TOOLS: dict[str, Tool] = {
-    "lookup_customer": Tool("lookup_customer", "Find the customer record (and bookings) for an email address.", LookupCustomerArgs, _lookup_customer),
+    "lookup_customer": Tool("lookup_customer", "Find the sender's customer record (and bookings). Only the sender's own address can be looked up.", LookupCustomerArgs, _lookup_customer),
     "search_kb": Tool("search_kb", "Search the clinic knowledge base (hours, prices, policies). Cite the returned chunk_id in drafts.", SearchKBArgs, _search_kb),
     "find_slots": Tool("find_slots", f"List free appointment slots between two dates (default {VISIT_MINUTES} min).", FindSlotsArgs, _find_slots),
     "book_slot": Tool("book_slot", "Book a slot for a customer. Queued for human approval.", BookSlotArgs, _book_slot),
