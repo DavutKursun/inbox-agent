@@ -18,7 +18,7 @@ twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clie
 1. **Tools with schemas** (`inbox_agent/tools.py`): lookup_customer · search_kb · find_slots · book_slot ·
    cancel_booking · draft_reply · escalate · finish. The model can only call these, with Pydantic-validated
    arguments.
-2. **Policy table** (`policy.py`): read/search/draft run immediately; book/cancel are **queued for approval**;
+2. **Policy table** (`policy.py`): read/search/draft run immediately; book/cancel are checked (ownership, free slot, future, 30-min grid) and **queued for approval**;
    send-email/refund/delete do not exist. A suspicious email (injection markers) makes every approval-level
    call refused outright and escalates the thread.
 3. **Loop** (`agent.py`, ~150 lines, no framework): model → tool calls → results, max 6 turns, full trace per

@@ -85,7 +85,8 @@ class PendingAction(BaseModel):
     thread_id: str
     tool: str
     args: dict
-    status: Literal["pending", "approved", "rejected", "executed"] = "pending"
+    customer_email: str = ""  # the sender the action was queued for; ownership is re-checked against it at execution
+    status: Literal["pending", "approved", "rejected", "executed", "failed"] = "pending"
     result: dict | str | None = None
 
 
@@ -111,4 +112,4 @@ class AgentResult(BaseModel):
     cost_usd: float = 0.0
     model: str = ""
     latency_ms: float = 0.0
-    stopped_reason: Literal["finish", "max_turns", "error"] = "finish"
+    stopped_reason: Literal["finish", "max_turns", "no_tool_calls", "error"] = "finish"

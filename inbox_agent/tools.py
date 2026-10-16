@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from .calendar import FakeCalendar
+from .calendar import GRID_MIN, Calendar
 from .config import VISIT_MINUTES
 from .crm import CRM
 from .kb import KnowledgeBase
@@ -28,11 +28,12 @@ from .store import Store
 @dataclass
 class Context:
     crm: CRM
-    calendar: FakeCalendar
+    calendar: Calendar
     kb: KnowledgeBase
     store: Store
     thread_id: str
     customer_email: str
+    today: date = field(default_factory=date.today)  # the agent's "now" for validity checks; Agent.handle sets it
     draft: Draft | None = None
     escalation: str = ""
     finish: FinishArgs | None = None
@@ -45,6 +46,7 @@ class Tool:
     description: str
     args_model: type[BaseModel]
     run: Callable[[BaseModel, Context], Any]
+    check: Callable[[BaseModel, Context], str | None] | None = None  # approval-level only: error string → not queued
 
 
 # --- implementations --------------------------------------------------------------
@@ -86,6 +88,39 @@ def _cancel_booking(a: CancelBookingArgs, ctx: Context):
     return ctx.crm.cancel_booking(a.booking_id, a.reason) or {"error": "unknown booking"}
 
 
+# --- queue-time checks for approval-level tools: an error string means the call is answered, never queued ---
+def _check_book_slot(a: BookSlotArgs, ctx: Context) -> str | None:
+    cust = ctx.crm.get(a.customer_id)
+    if cust is None:
+        return "unknown customer_id"
+    if cust["email"].lower() != ctx.customer_email.lower():
+        return "customer_id does not belong to the sender of this email"
+    hint = "use a slot returned by find_slots"
+    try:
+        start = datetime.fromisoformat(a.start)
+    except ValueError:
+        return f"start is not an ISO datetime ({hint})"
+    if start.tzinfo is not None:
+        return f"start must be a plain local time like 2026-10-21T09:00 ({hint})"
+    if start.date() < ctx.today:
+        return f"start is in the past (today is {ctx.today.isoformat()})"
+    if start.minute % GRID_MIN or start.second or start.microsecond:
+        return f"start must be on the {GRID_MIN}-minute grid ({hint})"
+    if not ctx.calendar.is_free(start, a.duration_min):
+        return f"slot is not free or outside opening hours ({hint})"
+    return None
+
+
+def _check_cancel_booking(a: CancelBookingArgs, ctx: Context) -> str | None:
+    rec = ctx.crm.lookup(ctx.customer_email)
+    booking = next((b for b in (rec["bookings"] if rec else []) if b["id"] == a.booking_id), None)
+    if booking is None:
+        return "booking_id does not belong to the sender of this email"
+    if booking["status"] != "confirmed":
+        return f"booking is already {booking['status']}"
+    return None
+
+
 _CLAIM_WORDS = re.compile(r"\b(₺|\$|€|TL|price|cost|fee|policy|hours|open|close|cancellation|refund|insurance|parking)\b", re.I)
 
 
@@ -111,8 +146,9 @@ TOOLS: dict[str, Tool] = {
     "lookup_customer": Tool("lookup_customer", "Find the sender's customer record (and bookings). Only the sender's own address can be looked up.", LookupCustomerArgs, _lookup_customer),
     "search_kb": Tool("search_kb", "Search the clinic knowledge base (hours, prices, policies). Cite the returned chunk_id in drafts.", SearchKBArgs, _search_kb),
     "find_slots": Tool("find_slots", f"List free appointment slots between two dates (default {VISIT_MINUTES} min).", FindSlotsArgs, _find_slots),
-    "book_slot": Tool("book_slot", "Book a slot for a customer. Queued for human approval.", BookSlotArgs, _book_slot),
-    "cancel_booking": Tool("cancel_booking", "Cancel one of the sender's bookings. Queued for human approval.", CancelBookingArgs, _cancel_booking),
+    "book_slot": Tool("book_slot", "Book a slot returned by find_slots for the sender. Queued for human approval.", BookSlotArgs, _book_slot, _check_book_slot),
+    "cancel_booking": Tool("cancel_booking", "Cancel one of the sender's confirmed bookings. Queued for human approval.", CancelBookingArgs, _cancel_booking,
+                           _check_cancel_booking),
     "draft_reply": Tool("draft_reply", "Save the reply draft (not sent). Include citations for any price/policy statement.", DraftReplyArgs, _draft_reply),
     "escalate": Tool("escalate", "Hand the thread to a human: complaints, legal, refunds, anything unclear or suspicious.", EscalateArgs, _escalate),
     "finish": Tool("finish", "End the thread with the detected intent and a one-line summary.", FinishArgs, _finish),

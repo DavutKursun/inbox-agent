@@ -2,6 +2,8 @@
 
 Opening hours come from the KB page "hours" but are hard-coded here too so the fake is
 self-contained: Mon–Fri 09:00–18:00, Sat 10:00–14:00, Sunday closed. Slots are on a 30-minute grid.
+`today` is injected (default: the real date) and is the only notion of "now": the whole of today counts as
+available from 00:00 and the wall clock is never consulted, so runs with --today are reproducible.
 `integrations/gcal.py` (Milestone 5) implements the same interface against Google Calendar.
 """
 
@@ -21,6 +23,7 @@ GRID_MIN = 30
 
 class Calendar(Protocol):
     def find_slots(self, date_from: date, date_to: date, duration_min: int) -> list[dict]: ...
+    def is_free(self, start: datetime, duration_min: int) -> bool: ...
     def book(self, start: datetime, duration_min: int, title: str) -> dict: ...
     def cancel(self, event_id: str) -> bool: ...
 
@@ -66,9 +69,8 @@ class FakeCalendar:
                 end_of_day = datetime.combine(d, time(close_h, 0))
                 while t + timedelta(minutes=duration_min) <= end_of_day and len(slots) < max_results:
                     t1 = t + timedelta(minutes=duration_min)
-                    if t > datetime.combine(self.today, datetime.now().time()) or d > self.today:
-                        if not any(_overlaps(t, t1, b0, b1) for b0, b1, _ in busy):
-                            slots.append({"start": t.isoformat(timespec="minutes"), "duration_min": duration_min})
+                    if not any(_overlaps(t, t1, b0, b1) for b0, b1, _ in busy):
+                        slots.append({"start": t.isoformat(timespec="minutes"), "duration_min": duration_min})
                     t += timedelta(minutes=GRID_MIN)
             d += timedelta(days=1)
         return slots

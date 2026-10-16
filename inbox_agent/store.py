@@ -18,8 +18,8 @@ class Store:
         (self.root / "traces").mkdir(parents=True, exist_ok=True)
 
     # --- pending actions -------------------------------------------------------
-    def queue(self, thread_id: str, tool: str, args: dict) -> PendingAction:
-        a = PendingAction(action_id=f"act_{uuid.uuid4().hex[:10]}", thread_id=thread_id, tool=tool, args=args)
+    def queue(self, thread_id: str, tool: str, args: dict, customer_email: str) -> PendingAction:
+        a = PendingAction(action_id=f"act_{uuid.uuid4().hex[:10]}", thread_id=thread_id, tool=tool, args=args, customer_email=customer_email)
         self._write(a)
         return a
 
