@@ -1,4 +1,4 @@
-"""Price table, cost per call, free-tier labelling and a daily budget guard.
+"""Price table, cost per call, free-tier labelling and a daily budget guard (dollars and provider calls).
 
 Prices in USD per million tokens (list prices checked 2026-10-09 at
 https://platform.claude.com/docs/en/about-claude/pricing). Models not in the table
@@ -63,9 +63,13 @@ class Spend:
 
 
 class BudgetGuard:
-    def __init__(self, path: str | Path, max_daily_usd: float, clock=time.time) -> None:
+    """Daily caps on dollars and on provider calls (steps), persisted in a small JSON file. On the free tier the
+    dollar cap never bites, so the call cap is what protects the shared daily quota."""
+
+    def __init__(self, path: str | Path, max_daily_usd: float, max_daily_calls: int = 150, clock=time.time) -> None:
         self.path = Path(path)
         self.max_daily_usd = max_daily_usd
+        self.max_daily_calls = max_daily_calls
         self._clock = clock
 
     def _today(self) -> str:
@@ -82,8 +86,10 @@ class BudgetGuard:
             return Spend(self._today(), 0.0, 0)
         return Spend(d["date"], float(d.get("usd", 0.0)), int(d.get("calls", 0)))
 
-    def can_spend(self, estimated_usd: float = 0.0) -> bool:
-        return self.read().usd + estimated_usd <= self.max_daily_usd
+    def can_spend(self, estimated_usd: float = 0.0, calls: int = 1) -> bool:
+        """True if ``calls`` more provider calls costing ``estimated_usd`` stay within both daily caps."""
+        s = self.read()
+        return s.usd + estimated_usd <= self.max_daily_usd and s.calls + calls <= self.max_daily_calls
 
     def record(self, usd: float) -> Spend:
         s = self.read()

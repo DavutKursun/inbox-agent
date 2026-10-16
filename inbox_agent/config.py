@@ -65,6 +65,7 @@ class Settings:
     max_turns: int = field(default_factory=lambda: int(_env("MAX_TURNS", "6")))
     max_email_chars: int = field(default_factory=lambda: int(_env("MAX_EMAIL_CHARS", "2000")))
     max_daily_usd: float = field(default_factory=lambda: float(_env("MAX_DAILY_USD", "1")))
+    max_daily_calls: int = field(default_factory=lambda: int(_env("MAX_DAILY_CALLS", "150")))
     budget_file: Path = field(default_factory=lambda: Path(_env("BUDGET_FILE", ".budget.json")))
     calendar_mode: str = field(default_factory=lambda: _env("CALENDAR_MODE", "fake"))
     gmail_mode: str = field(default_factory=lambda: _env("GMAIL_MODE", "off"))

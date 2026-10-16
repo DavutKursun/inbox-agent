@@ -22,7 +22,7 @@ twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clie
    send-email/refund/delete do not exist. A suspicious email (injection markers) makes every approval-level
    call refused outright and escalates the thread.
 3. **Loop** (`agent.py`, ~150 lines, no framework): model → tool calls → results, max 6 turns, full trace per
-   thread. Drafts that state a price or policy without a KB citation are flagged "unverified claim".
+   thread. Drafts that state a price or policy without citing a chunk that search_kb returned in the same thread are flagged "unverified claim".
 4. **Approval queue** (`store.py`): a human approves or rejects from the UI/API; only then does the tool run.
 5. **Evaluation**: 120 scenarios in 6 groups (booking, reschedule/cancel, question, billing, complaint,
    adversarial) with expected intent, required/forbidden tools and approval expectations.

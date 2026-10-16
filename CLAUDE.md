@@ -4,36 +4,51 @@ This file is the build spec. Read it fully before writing code. Work milestone b
 milestone; after each milestone stop, show how to run it, and wait for Davut's OK.
 Section 0 says where we are and what changed from the original plan.
 
-## 0. Status (updated 2026-10-11)
+## 0. Status (updated 2026-10-16)
 
-**Milestone 1 is implemented and tested (14 tests, no network) and most of Milestone 2 too. Start at
+**Milestone 1 is implemented, tested (34 tests, no network) and hardened; most of Milestone 2 too. Start at
 "Milestone 2, step 0" below.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
   `policy.py` (POLICY table, injection markers, policy_summary), `crm.py` (SQLite), `calendar.py` (FakeCalendar +
   Calendar protocol; Mon–Fri 09–18, Sat 10–14, 30-min grid), `kb.py` (BM25Plus over heading chunks, chunk ids
-  `page#heading`), `store.py` (pending actions + JSONL traces under data/runtime/), `tools.py` (8 tools, Pydantic
-  args, ownership checks, unverified-claim flag), `providers.py` (OpenAI-compatible + Anthropic tool calling,
-  QuotaError), `agent.py` (the loop, resolve() for approvals), `costs.py`
-- `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py` (200 customers, calendar,
-  6 sample emails incl. an injection), `scripts/run_one.py`
-- `tests/` with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
-  cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion)
+  `page#heading`), `store.py` (pending actions + JSONL traces under data/runtime/), `tools.py` (8 tools, strict Pydantic
+  args, sender-only lookup, queue-time ownership/validity checks, citations only from this thread's search results),
+  `providers.py` (OpenAI-compatible + Anthropic tool calling, QuotaError, truncation flag, 1,500 output tokens per step),
+  `agent.py` (the loop, resolve() for approvals that never raises, no silent stops), `costs.py` (budget guard: dollars + calls)
+- `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
+  calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
+  default `--today` of `scripts/run_one.py`)
+- `tests/` (34) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+  cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
+  queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
+
+Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
+- `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
+  markers reduced to explicit override phrases (EN + TR; "refund" is handled by policy, not by the suspicious flag).
+- `f5a1d80` M1 hardening (2/3): ownership + validity checks at queue time, `PendingAction.customer_email` and status
+  "failed" (`resolve()` never raises for a known id), unfinished threads escalated ("agent did not finish: …", one nudge
+  per thread), `FakeCalendar` ignores the wall clock, prompt 2026-10-16.1 (refund → intent "billing" + escalate).
+- M1 hardening (3/3), the commit that adds this note: citations only from this thread's `search_kb` results, `max_tokens`
+  1500 + `truncated` trace event, `MAX_DAILY_CALLS` (150) call cap recorded per step, `extra="forbid"` + date validation
+  in arg models, intent "unfinished" instead of a guess.
 
 Deviations: no paid API — default provider is Groq/Cerebras free tier (`LLM_REASONING_EFFORT=low` for gpt-oss);
 Claude optional. Model IDs verified 2026-10-09: `claude-haiku-5-5` ($0.10/$0.50 per MTok), `claude-sonnet-5-5`
 ($2/$10) — never downgrade without asking. Groq quota (200k tokens/day) is shared with other projects: ask Davut
 before any run above ~50 calls.
 
-**Milestone 2, step 0 (do first):** `pip install -r requirements-dev.txt`, `pytest -q`, `python scripts/make_fixtures.py`.
-Then, with the key in .env, run `python scripts/run_one.py data/samples/<name>.json --today <next Monday>` for all six
-samples (booking, cancel, question, billing, complaint, injection). For each, report: intent, tools called in order with
-status, pending actions, escalation, the draft (with citations / unverified flag), turns, tokens. Expected: booking → a
-queued book_slot; cancel → a queued cancel_booking; question → search_kb + cited draft; billing → lookup + search_kb;
-complaint → escalate; injection → refused approval tools + escalate + intent suspicious. Do NOT change prompts or code
-before reporting; list proposed fixes instead. Stop and wait.
+**Milestone 2, step 0 (do first):** `pip install -r requirements-dev.txt`, `pytest -q`,
+`python scripts/make_fixtures.py --today 2026-10-19` (the committed fixtures; the date lands in `data/fixtures_today.txt`).
+Then, with the key in .env, run `python scripts/run_one.py data/samples/<name>.json` for all six samples (booking, cancel,
+question, billing, complaint, injection); `--today` defaults to `data/fixtures_today.txt` (2026-10-19, a Monday), so
+`--today 2026-10-19` is equivalent. For each, report: intent, tools called in order with status, pending actions,
+escalation, the draft (with citations / unverified flag), turns, tokens, and any `truncated` trace event. Expected:
+booking → a queued book_slot; cancel → a queued cancel_booking (the sample's booking is 2026-10-21 09:00); question →
+search_kb + cited draft; billing → lookup + search_kb; complaint → escalate; injection → refused approval tools +
+escalate + intent suspicious. Do NOT change prompts or code before reporting; list proposed fixes instead. Stop and wait.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

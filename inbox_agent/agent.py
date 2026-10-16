@@ -4,8 +4,9 @@
 
 1. Build the system prompt (role, policy summary, today's date) and the user message (the email,
    wrapped as data).
-2. Up to MAX_TURNS times: ask the model; for each tool call → validate args (Pydantic) →
-   consult policy → run / queue / refuse → append the result; stop when `finish` is called.
+2. Up to MAX_TURNS times: ask the model (MAX_TOKENS output tokens per step, one budgeted call each); for
+   each tool call → validate args (Pydantic, strict) → consult policy → run / queue / refuse → append the
+   result; stop when `finish` is called. A cut-off or prose-only answer gets one nudge per thread.
 3. Everything is written to the trace; approval-level tools pass ownership + validity checks, are queued
    in the Store and run later via `resolve(action_id, approve=True)`.
 
@@ -24,7 +25,7 @@ from pydantic import ValidationError
 from .config import COMPANY, settings
 from .costs import BudgetGuard, cost_usd
 from .policy import looks_suspicious, policy_summary, risk_of
-from .providers import Provider, ProviderError, StepResult, tool_result_message
+from .providers import MAX_TOKENS, Provider, ProviderError, StepResult, tool_result_message
 from .schema import AgentResult, Email, PendingAction, ToolCall, ToolEvent
 from .tools import TOOLS, Context, new_thread_id, tool_specs
 
@@ -65,7 +66,8 @@ class Agent:
         if len(email.body) > settings.max_email_chars:
             raise ValueError(f"email longer than {settings.max_email_chars} characters")
         if self.budget is not None and not self.budget.can_spend():
-            raise RuntimeError("daily budget exhausted")
+            spent = self.budget.read()
+            raise RuntimeError(f"daily budget exhausted ({spent.calls} calls, ${spent.usd:.4f} today)")
         thread_id = thread_id or new_thread_id()
         ctx = self.ctx_factory(thread_id, email.from_email)
         ctx.today = self.today  # the agent's "now" for validity checks: reproducible with --today
@@ -81,17 +83,21 @@ class Agent:
         stopped, why, nudged = "max_turns", f"max turns ({self.max_turns}) reached", False
         for turn in range(1, self.max_turns + 1):
             try:
-                step: StepResult = self.provider.step(messages, self.specs)
+                step: StepResult = self.provider.step(messages, self.specs, max_tokens=MAX_TOKENS)
             except ProviderError as exc:
                 store.append_trace(thread_id, {"event": "error", "turn": turn, "error": str(exc)})
                 stopped, why = "error", f"provider error: {exc}"
                 break
             tin, tout = tin + step.input_tokens, tout + step.output_tokens
+            if self.budget is not None:  # one call per provider step, against both daily caps
+                self.budget.record(cost_usd(self.provider.model, step.input_tokens, step.output_tokens))
             messages.append(step.raw_assistant)
             store.append_trace(thread_id, {"event": "model", "turn": turn, "text": step.text, "tool_calls": [c.model_dump() for c in step.tool_calls], "tokens": [step.input_tokens, step.output_tokens]})
+            if step.truncated:  # hit max_tokens: a cut tool call fails validation below; the nudge asks for a retry
+                store.append_trace(thread_id, {"event": "truncated", "turn": turn, "max_tokens": MAX_TOKENS})
             if not step.tool_calls:
-                if nudged:  # prose twice in a row: stop and let a human take over
-                    stopped, why = "no_tool_calls", "model answered in prose twice without calling tools"
+                if nudged:  # a second prose-only (or cut-off) answer: stop and let a human take over
+                    stopped, why = "no_tool_calls", ("model output was truncated twice" if step.truncated else "model answered in prose twice without calling tools")
                     break
                 messages.append({"role": "user", "content": NUDGE})
                 nudged = True
@@ -107,15 +113,16 @@ class Agent:
             if finished:
                 stopped = "finish"
                 break
+            if step.truncated and not nudged:  # the complete calls ran; ask once for the rest
+                messages.append({"role": "user", "content": NUDGE})
+                nudged = True
         if suspicious and not ctx.escalation:
             ctx.escalation = "suspicious content in email (automatic)"
         if stopped != "finish":  # no silent stops: an unfinished thread always reaches a human
             note = f"agent did not finish: {why}"
             ctx.escalation = f"{ctx.escalation}; {note}" if ctx.escalation else note
         cost = cost_usd(self.provider.model, tin, tout)
-        if self.budget is not None:
-            self.budget.record(cost)
-        intent = ctx.finish.intent if ctx.finish else ("suspicious" if suspicious else "out_of_scope")
+        intent = ctx.finish.intent if ctx.finish else "unfinished"  # never guessed: the model did not finish
         summary = ctx.finish.summary if ctx.finish else "Agent stopped before finishing; human review needed."
         res = AgentResult(thread_id=thread_id, intent=intent, summary=summary, draft_reply=ctx.draft,
                           actions_taken=[e for e in taken if e.call.name != "finish"], actions_pending=pending,

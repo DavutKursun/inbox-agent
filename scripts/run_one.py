@@ -51,7 +51,7 @@ def main() -> int:
         print("not configured:", e)
         return 2
     email = Email.model_validate(json.loads(Path(args.file).read_text(encoding="utf-8")))
-    agent = Agent(provider, default_ctx_factory(today), budget=BudgetGuard(settings.budget_file, settings.max_daily_usd), today=today)
+    agent = Agent(provider, default_ctx_factory(today), budget=BudgetGuard(settings.budget_file, settings.max_daily_usd, settings.max_daily_calls), today=today)
     try:
         res = agent.handle(email)
     except ProviderError as e:

@@ -1,7 +1,8 @@
 """Chat providers with tool calling, normalised to one interface.
 
 ``step(messages, tools)`` sends the conversation and returns ``StepResult(text, tool_calls,
-input_tokens, output_tokens, elapsed)``. The loop (agent.py) appends tool results with
+input_tokens, output_tokens, elapsed, raw_assistant, truncated)``; ``truncated`` means the model hit
+``max_tokens`` (OpenAI finish_reason "length" / Anthropic stop_reason "max_tokens"). The loop (agent.py) appends tool results with
 ``tool_result_message(...)``. Messages are kept in OpenAI format internally; the Anthropic
 provider converts both ways.
 
@@ -20,6 +21,8 @@ from typing import Protocol
 
 from .schema import ToolCall
 
+MAX_TOKENS = 1500  # output tokens per step: a 3,000-character draft plus tool-call JSON (and gpt-oss reasoning) fits
+
 
 class ProviderError(RuntimeError):
     pass
@@ -37,13 +40,14 @@ class StepResult:
     output_tokens: int
     elapsed_seconds: float
     raw_assistant: dict = field(default_factory=dict)  # OpenAI-format assistant message to append
+    truncated: bool = False  # hit max_tokens: tool-call JSON may be cut (it then fails validation in the loop)
 
 
 class Provider(Protocol):
     name: str
     model: str
 
-    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = 800) -> StepResult: ...
+    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = MAX_TOKENS) -> StepResult: ...
 
 
 def _wrap(exc: Exception) -> ProviderError:
@@ -71,7 +75,7 @@ class OpenAICompatProvider:
             client = OpenAI(api_key=api_key, base_url=base_url, max_retries=2)
         self._client, self.model, self.reasoning_effort = client, model, reasoning_effort
 
-    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = 800) -> StepResult:
+    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = MAX_TOKENS) -> StepResult:
         kwargs = dict(model=self.model, messages=messages, tools=tools, tool_choice="auto", max_tokens=max_tokens, temperature=0)
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
@@ -81,7 +85,8 @@ class OpenAICompatProvider:
         except Exception as exc:
             raise _wrap(exc) from exc
         elapsed = time.perf_counter() - t0
-        m = resp.choices[0].message
+        choice = resp.choices[0]
+        m = choice.message
         calls = []
         raw_calls = []
         for tc in m.tool_calls or []:
@@ -95,7 +100,8 @@ class OpenAICompatProvider:
         if raw_calls:
             raw["tool_calls"] = raw_calls
         u = resp.usage
-        return StepResult(m.content or "", calls, int(getattr(u, "prompt_tokens", 0) or 0), int(getattr(u, "completion_tokens", 0) or 0), elapsed, raw)
+        return StepResult(m.content or "", calls, int(getattr(u, "prompt_tokens", 0) or 0), int(getattr(u, "completion_tokens", 0) or 0), elapsed, raw,
+                          truncated=getattr(choice, "finish_reason", None) == "length")
 
 
 class AnthropicProvider:
@@ -122,7 +128,10 @@ class AnthropicProvider:
             if m["role"] == "system":
                 system += m["content"]
             elif m["role"] == "user":
-                out.append({"role": "user", "content": m["content"]})
+                if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list):  # e.g. the nudge right after tool results
+                    out[-1]["content"].append({"type": "text", "text": m["content"]})
+                else:
+                    out.append({"role": "user", "content": m["content"]})
             elif m["role"] == "assistant":
                 blocks: list[dict] = []
                 if m.get("content"):
@@ -138,7 +147,7 @@ class AnthropicProvider:
                     out.append({"role": "user", "content": [block]})
         return system, out
 
-    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = 800) -> StepResult:
+    def step(self, messages: list[dict], tools: list[dict], max_tokens: int = MAX_TOKENS) -> StepResult:
         system, msgs = self._convert(messages)
         t0 = time.perf_counter()
         try:
@@ -156,7 +165,8 @@ class AnthropicProvider:
         raw = {"role": "assistant", "content": text}
         if raw_calls:
             raw["tool_calls"] = raw_calls
-        return StepResult(text, calls, resp.usage.input_tokens, resp.usage.output_tokens, elapsed, raw)
+        return StepResult(text, calls, resp.usage.input_tokens, resp.usage.output_tokens, elapsed, raw,
+                          truncated=getattr(resp, "stop_reason", None) == "max_tokens")
 
 
 def get_provider(cfg) -> Provider:

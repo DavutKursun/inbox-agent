@@ -22,13 +22,15 @@ TODAY = dt.date(2026, 10, 12)  # a Monday
 
 
 class ScriptedProvider:
-    """Plays a fixed list of turns; each turn is a list of (tool_name, args). Records messages it saw."""
+    """Plays a fixed list of turns; each turn is a list of (tool_name, args). Records messages it saw.
+    ``truncated`` holds the 1-based step numbers reported as cut off by max_tokens."""
 
     name = "scripted"
     model = "scripted-model"
 
-    def __init__(self, turns: list[list[tuple[str, dict]]]) -> None:
+    def __init__(self, turns: list[list[tuple[str, dict]]], truncated: set[int] | tuple[int, ...] = ()) -> None:
         self.turns = turns
+        self.truncated = set(truncated)
         self.seen: list[list[dict]] = []
         self._i = 0
 
@@ -39,7 +41,7 @@ class ScriptedProvider:
         tcs = [ToolCall(id=f"c{self._i}_{k}", name=n, args=a) for k, (n, a) in enumerate(calls)]
         raw = {"role": "assistant", "content": "", "tool_calls": [
             {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": json.dumps(c.args)}} for c in tcs]}
-        return StepResult("", tcs, 500, 60, 0.01, raw)
+        return StepResult("", tcs, 500, 60, 0.01, raw, truncated=self._i in self.truncated)
 
 
 @pytest.fixture

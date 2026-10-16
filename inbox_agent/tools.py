@@ -34,6 +34,7 @@ class Context:
     thread_id: str
     customer_email: str
     today: date = field(default_factory=date.today)  # the agent's "now" for validity checks; Agent.handle sets it
+    retrieved: set[str] = field(default_factory=set)  # chunk_ids search_kb returned in this thread: the only citable ones
     draft: Draft | None = None
     escalation: str = ""
     finish: FinishArgs | None = None
@@ -62,7 +63,9 @@ def _lookup_customer(a: LookupCustomerArgs, ctx: Context):
 
 
 def _search_kb(a: SearchKBArgs, ctx: Context):
-    return {"results": ctx.kb.search(a.query, k=3)}
+    results = ctx.kb.search(a.query, k=3)
+    ctx.retrieved.update(r["chunk_id"] for r in results)
+    return {"results": results}
 
 
 def _find_slots(a: FindSlotsArgs, ctx: Context):
@@ -96,12 +99,7 @@ def _check_book_slot(a: BookSlotArgs, ctx: Context) -> str | None:
     if cust["email"].lower() != ctx.customer_email.lower():
         return "customer_id does not belong to the sender of this email"
     hint = "use a slot returned by find_slots"
-    try:
-        start = datetime.fromisoformat(a.start)
-    except ValueError:
-        return f"start is not an ISO datetime ({hint})"
-    if start.tzinfo is not None:
-        return f"start must be a plain local time like 2026-10-21T09:00 ({hint})"
+    start = datetime.fromisoformat(a.start)  # format and "no timezone offset" are validated by BookSlotArgs
     if start.date() < ctx.today:
         return f"start is in the past (today is {ctx.today.isoformat()})"
     if start.minute % GRID_MIN or start.second or start.microsecond:
@@ -125,11 +123,11 @@ _CLAIM_WORDS = re.compile(r"\b(₺|\$|€|TL|price|cost|fee|policy|hours|open|cl
 
 
 def _draft_reply(a: DraftReplyArgs, ctx: Context):
-    valid = ctx.kb.chunk_ids()
-    cites = [c for c in a.citations if c in valid]
+    cites = [c for c in a.citations if c in ctx.retrieved]  # only chunks search_kb returned in this thread count
+    ignored = [c for c in a.citations if c not in ctx.retrieved]
     unverified = bool(_CLAIM_WORDS.search(a.body)) and not cites
     ctx.draft = Draft(subject=a.subject, body=a.body, citations=cites, unverified_claim=unverified)
-    return {"saved": True, "unverified_claim": unverified, "ignored_citations": [c for c in a.citations if c not in valid]}
+    return {"saved": True, "unverified_claim": unverified, "ignored_citations": ignored}
 
 
 def _escalate(a: EscalateArgs, ctx: Context):
@@ -149,7 +147,7 @@ TOOLS: dict[str, Tool] = {
     "book_slot": Tool("book_slot", "Book a slot returned by find_slots for the sender. Queued for human approval.", BookSlotArgs, _book_slot, _check_book_slot),
     "cancel_booking": Tool("cancel_booking", "Cancel one of the sender's confirmed bookings. Queued for human approval.", CancelBookingArgs, _cancel_booking,
                            _check_cancel_booking),
-    "draft_reply": Tool("draft_reply", "Save the reply draft (not sent). Include citations for any price/policy statement.", DraftReplyArgs, _draft_reply),
+    "draft_reply": Tool("draft_reply", "Save the reply draft (not sent). Cite chunk_ids returned by search_kb in this thread for any price/policy statement.", DraftReplyArgs, _draft_reply),
     "escalate": Tool("escalate", "Hand the thread to a human: complaints, legal, refunds, anything unclear or suspicious.", EscalateArgs, _escalate),
     "finish": Tool("finish", "End the thread with the detected intent and a one-line summary.", FinishArgs, _finish),
 }

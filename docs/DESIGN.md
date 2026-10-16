@@ -12,7 +12,12 @@ trace. Swapping the model is one environment variable; swapping a tool is one fu
 - Approval never raises: if the tool fails at execution time (the slot was taken meanwhile, a stale id) the action
   becomes "failed" with the error in its result, visible in the queue and the trace.
 - No silent stops: a thread that hits the turn limit, a provider error or two prose-only answers is escalated with
-  "agent did not finish: …" so a human always picks it up.
+  "agent did not finish: …" so a human always picks it up, and its intent is "unfinished", never a guess.
+- The loop computes `actions_taken` and `actions_pending` itself from what it executed and queued; `finish` only
+  takes `intent` and `summary`. The spec's `finish(summary, actions_taken, actions_pending)` would let the model
+  misreport its own actions, so the model cannot claim "unfinished" either.
+- Tool arguments are strict (`extra="forbid"`, dates and datetimes validated in the model), so an unknown field or a
+  malformed date is an error to the model, not a silently ignored input.
 - Ownership checks live in the tools: lookup_customer only returns the sender's own record, a customer can only
   cancel their own bookings, book_slot refuses a customer_id that does not match the sender.
 - Suspicious emails: lexical markers (cheap, transparent) flag the thread; approval tools are refused for the
@@ -30,11 +35,14 @@ clock, so runs with `--today` are reproducible.
 
 ## Knowledge base
 BM25 over heading-level chunks of nine markdown pages; chunk ids like `prices#price-list` are what drafts cite.
-A draft that mentions money, hours or policy without a valid citation is flagged `unverified_claim`.
+A draft may cite only chunk ids that `search_kb` returned earlier in the same thread (anything else comes back as
+`ignored_citations`); a draft that mentions money, hours or policy without such a citation is flagged `unverified_claim`.
 
 ## Cost accounting
 Measured tokens × list prices (`costs.py`); free tiers labelled "free tier"; Claude Haiku quoted "as if" so a
-paying client can compare.
+paying client can compare. Daily caps on both dollars (`MAX_DAILY_USD`) and provider calls (`MAX_DAILY_CALLS`, 150),
+one call recorded per agent step; on the free tier only the call cap bites. Each step allows 1,500 output tokens;
+a cut-off answer is logged as a `truncated` trace event and the model is nudged once.
 
 ## Findings
 _Milestone 3._

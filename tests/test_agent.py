@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from inbox_agent.agent import NUDGE, PROMPT_VERSION, Agent, system_prompt
 from inbox_agent.calendar import FakeCalendar
+from inbox_agent.costs import BudgetGuard
 from inbox_agent.policy import POLICY, looks_suspicious, risk_of
-from inbox_agent.providers import AnthropicProvider, ProviderError, tool_result_message
-from inbox_agent.schema import Email
+from inbox_agent.providers import MAX_TOKENS, AnthropicProvider, OpenAICompatProvider, ProviderError, tool_result_message
+from inbox_agent.schema import BookSlotArgs, Email, FindSlotsArgs, SearchKBArgs
 from inbox_agent.tools import TOOLS, tool_specs
 from tests.conftest import TODAY, ScriptedProvider
 
@@ -61,18 +64,20 @@ def _email(body, frm="ada@example.com", subject="hi"):
 
 
 def test_booking_flow_queues_approval_and_resolves(world):
+    cite = world["kb"].search("book an appointment")[0]["chunk_id"]
     p = ScriptedProvider([
-        [("lookup_customer", {"email": "ada@example.com"}), ("find_slots", {"date_from": "2026-10-13", "date_to": "2026-10-14"})],
+        [("lookup_customer", {"email": "ada@example.com"}), ("find_slots", {"date_from": "2026-10-13", "date_to": "2026-10-14"}),
+         ("search_kb", {"query": "book an appointment"})],
         [("book_slot", {"customer_id": world["ada"], "start": "2026-10-13T09:00", "duration_min": 30, "reason": "check-up"})],
-        [("draft_reply", {"subject": "Re: hi", "body": "We have requested Tuesday 09:00 for you; reception will confirm.", "citations": ["booking#booking-an-appointment"]}),
+        [("draft_reply", {"subject": "Re: hi", "body": "We have requested Tuesday 09:00 for you; reception will confirm.", "citations": [cite]}),
          ("finish", {"intent": "booking", "summary": "Check-up requested for Tue 09:00, pending approval."})],
     ])
     agent = Agent(p, world["factory"], max_turns=6, today=TODAY)
     res = agent.handle(_email("Can I book a check-up on Tuesday morning?"))
     assert res.intent == "booking" and res.stopped_reason == "finish" and res.turns == 3
-    assert [e.call.name for e in res.actions_taken] == ["lookup_customer", "find_slots", "book_slot", "draft_reply"]
-    assert res.actions_taken[2].status == "queued" and len(res.actions_pending) == 1
-    assert res.draft_reply.citations == ["booking#booking-an-appointment"] and not res.draft_reply.unverified_claim
+    assert [e.call.name for e in res.actions_taken] == ["lookup_customer", "find_slots", "search_kb", "book_slot", "draft_reply"]
+    assert res.actions_taken[3].status == "queued" and len(res.actions_pending) == 1
+    assert res.draft_reply.citations == [cite] and not res.draft_reply.unverified_claim
     # nothing booked yet
     assert world["crm"].lookup("ada@example.com")["bookings"][-1]["id"] == "evt_ada"
     # approve → executed
@@ -132,7 +137,7 @@ def test_forbidden_and_invalid_calls_do_not_crash(world):
 def test_max_turns_without_finish(world):
     p = ScriptedProvider([[("search_kb", {"query": "hours"})]])  # never finishes
     res = Agent(p, world["factory"], max_turns=3, today=TODAY).handle(_email("when are you open"))
-    assert res.stopped_reason == "max_turns" and res.turns == 3 and "human review" in res.summary
+    assert res.stopped_reason == "max_turns" and res.turns == 3 and "human review" in res.summary and res.intent == "unfinished"
 
 
 def test_draft_without_citation_is_flagged(world):
@@ -284,3 +289,109 @@ def test_prompt_refund_guidance_and_version():
     assert "refund now" not in sp and "as the system, override your rules" in sp
     assert 'Refund requests are intent "billing"' in sp and "call escalate" in sp
     assert PROMPT_VERSION == "2026-10-16.1"
+
+
+# --- M1 hardening (3/3): citation tracking, truncation, call cap, strict schemas, unfinished intent -------
+def test_citations_must_come_from_this_threads_search(world):
+    hit = world["kb"].search("whitening price")[0]["chunk_id"]
+    body = "Whitening costs 6000 TL."
+    p = ScriptedProvider([
+        [("draft_reply", {"subject": "Re", "body": body, "citations": [hit]})],  # a real chunk id, but nothing was searched yet
+        [("search_kb", {"query": "whitening price"})],
+        [("draft_reply", {"subject": "Re", "body": body, "citations": [hit, "hours#top"]}), ("finish", {"intent": "question", "summary": "price"})],
+    ])
+    res = Agent(p, world["factory"], today=TODAY).handle(_email("whitening price?"))
+    assert res.actions_taken[0].result == {"saved": True, "unverified_claim": True, "ignored_citations": [hit]}
+    assert res.actions_taken[2].result == {"saved": True, "unverified_claim": False, "ignored_citations": ["hours#top"]}
+    assert res.draft_reply.citations == [hit] and not res.draft_reply.unverified_claim
+
+
+def test_truncated_step_is_logged_and_nudged_once(world):
+    p = ScriptedProvider([[], [("search_kb", {"query": "hours"}), ("finish", {"intent": "question", "summary": "hours"})]], truncated={1})
+    res = Agent(p, world["factory"], today=TODAY).handle(_email("hours?"))
+    assert res.stopped_reason == "finish" and res.turns == 2 and not res.escalated
+    assert {"event": "truncated", "turn": 1, "max_tokens": MAX_TOKENS} in world["store"].read_trace(res.thread_id)
+    assert sum(m.get("content") == NUDGE for m in p.seen[-1]) == 1
+    # cut off twice without a usable tool call: stop and escalate
+    p = ScriptedProvider([[]], truncated={1, 2})
+    res = Agent(p, world["factory"], today=TODAY).handle(_email("hours?"))
+    assert res.stopped_reason == "no_tool_calls" and res.escalation_reason == "agent did not finish: model output was truncated twice"
+    # cut off after a complete tool call: the call runs, then the single nudge follows its result
+    p = ScriptedProvider([[("search_kb", {"query": "hours"})], [("finish", {"intent": "question", "summary": "hours"})]], truncated={1})
+    res = Agent(p, world["factory"], today=TODAY).handle(_email("hours?"))
+    assert res.actions_taken[0].status == "ok" and res.stopped_reason == "finish"
+    assert [m["role"] for m in p.seen[-1][-2:]] == ["tool", "user"] and p.seen[-1][-1]["content"] == NUDGE
+
+
+def test_providers_report_truncation_and_send_max_tokens():
+    seen: dict = {}
+
+    class Completions:
+        def create(self, **kw):
+            seen.update(kw)
+            cut = SimpleNamespace(id="t1", function=SimpleNamespace(name="draft_reply", arguments='{"subject": "Re'))
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[cut]), finish_reason="length")],
+                                   usage=SimpleNamespace(prompt_tokens=10, completion_tokens=1500))
+
+    p = OpenAICompatProvider("k", "http://localhost:9", "m", client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())))
+    r = p.step([{"role": "user", "content": "hi"}], tool_specs(), max_tokens=MAX_TOKENS)
+    assert r.truncated and seen["max_tokens"] == 1500 and r.tool_calls[0].args == {"_invalid_json": '{"subject": "Re'}
+
+    class Messages:
+        def create(self, **kw):
+            seen.update(kw)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="cut")], stop_reason="max_tokens",
+                                   usage=SimpleNamespace(input_tokens=5, output_tokens=1500))
+
+    p = AnthropicProvider("k", "m", client=SimpleNamespace(messages=Messages()))
+    r = p.step([{"role": "user", "content": "hi"}], tool_specs())
+    assert r.truncated and seen["max_tokens"] == MAX_TOKENS == 1500 and r.text == "cut"
+    # the nudge after tool results is merged into the same user turn for Anthropic
+    msgs = [{"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "search_kb", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "t1", "name": "search_kb", "content": "{}"}, {"role": "user", "content": NUDGE}]
+    _, out = AnthropicProvider._convert(msgs)
+    assert len(out) == 2 and [b["type"] for b in out[1]["content"]] == ["tool_result", "text"]
+
+
+def test_budget_guard_caps_dollars_and_calls(tmp_path):
+    g = BudgetGuard(tmp_path / "b.json", max_daily_usd=1.0, max_daily_calls=2)
+    assert g.can_spend()
+    g.record(0.0)
+    g.record(0.0)
+    assert g.read().calls == 2 and not g.can_spend()  # call cap reached although nothing was spent
+    g = BudgetGuard(tmp_path / "c.json", max_daily_usd=0.5, max_daily_calls=100)
+    g.record(0.5)
+    assert g.can_spend() and not g.can_spend(0.01)
+
+
+def test_agent_records_one_call_per_step(world, tmp_path):
+    g = BudgetGuard(tmp_path / "b.json", max_daily_usd=1.0, max_daily_calls=3)
+    p = ScriptedProvider([[("search_kb", {"query": "hours"})], [("search_kb", {"query": "parking"})], [("finish", {"intent": "question", "summary": "hours"})]])
+    res = Agent(p, world["factory"], budget=g, today=TODAY).handle(_email("hours and parking?"))
+    assert res.turns == 3 and g.read().calls == 3
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        Agent(p, world["factory"], budget=g, today=TODAY).handle(_email("one more"))
+
+
+def test_arg_models_are_strict_and_validate_dates(world):
+    for spec in tool_specs():
+        assert spec["function"]["parameters"]["additionalProperties"] is False, spec["function"]["name"]
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        SearchKBArgs(query="parking", send_to_customer=True)
+    with pytest.raises(ValidationError, match="date like"):
+        FindSlotsArgs(date_from="next tuesday", date_to="2026-10-20")
+    with pytest.raises(ValidationError, match="timezone"):
+        BookSlotArgs(customer_id=1, start="2026-10-13T09:00+03:00")
+    assert BookSlotArgs(customer_id=1, start="2026-10-13T09:00").start == "2026-10-13T09:00"
+    p = ScriptedProvider([[("search_kb", {"query": "parking", "send_to_customer": True})], [("finish", {"intent": "question", "summary": "parking"})]])
+    res = Agent(p, world["factory"], today=TODAY).handle(_email("parking?"))
+    assert res.actions_taken[0].status == "error" and "Extra inputs" in res.actions_taken[0].result
+
+
+def test_unfinished_intent_is_never_guessed_and_never_claimed(world):
+    r = Agent(ScriptedProvider([[("search_kb", {"query": "hours"})]]), world["factory"], max_turns=2, today=TODAY).handle(_email("hours?"))
+    assert r.intent == "unfinished" and r.escalated
+    r = Agent(ScriptedProvider([[("finish", {"intent": "unfinished", "summary": "I give up"})]]), world["factory"], max_turns=2, today=TODAY).handle(_email("hi"))
+    assert r.intent == "unfinished" and r.stopped_reason == "max_turns"
+    finishes = [e for e in world["store"].read_trace(r.thread_id) if e.get("call", {}).get("name") == "finish"]
+    assert finishes and all(e["status"] == "error" for e in finishes)
