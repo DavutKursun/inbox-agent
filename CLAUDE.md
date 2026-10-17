@@ -6,7 +6,7 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestone 1 is implemented, tested (42 tests, no network) and hardened; most of Milestone 2 too. Start at
+**Milestone 1 is implemented, tested (45 tests, no network) and hardened; most of Milestone 2 too. Start at
 "Milestone 2, step 0" below.**
 
 Implemented:
@@ -20,7 +20,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (42) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (45) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
@@ -31,9 +31,17 @@ Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4;
 - `f5a1d80` M1 hardening (2/3): ownership + validity checks at queue time, `PendingAction.customer_email` and status
   "failed" (`resolve()` never raises for a known id), unfinished threads escalated ("agent did not finish: …", one nudge
   per thread), `FakeCalendar` ignores the wall clock, prompt 2026-10-16.1 (refund → intent "billing" + escalate).
-- M1 hardening (3/3), the commit that adds this note: citations only from this thread's `search_kb` results, `max_tokens`
-  1500 + `truncated` trace event, `MAX_DAILY_CALLS` (150) call cap recorded per step, `extra="forbid"` + date validation
-  in arg models, intent "unfinished" instead of a guess.
+- `c70d9f2` M1 hardening (3/3): citations only from this thread's `search_kb` results, `max_tokens` 1500 + `truncated`
+  trace event, `MAX_DAILY_CALLS` (150) call cap recorded per step, `extra="forbid"` + date validation in arg models,
+  intent "unfinished" instead of a guess.
+
+Live-run fixes (2026-10-17, gpt-oss-120b on Groq; traces in docs/DESIGN.md):
+- `a9447c3` forced tool calls, finish-from-text fallback, weekday + `starts_in_hours` in tool results, billing path in
+  the prompt, clinic name as KB stopwords, narrower unverified-claim rule, per-step latency + reasoning length in traces.
+- The commit adding this note: Groq's HTTP 400 `tool_use_failed` becomes a prose-only step instead of killing the
+  thread, finish JSON accepted inside a ```json fence, **MAX_TURNS default 8** (spec says 6: this model makes one tool
+  call per turn, so lookup + three searches + draft + finish already fill six), prompt date list labelled
+  "This week / Next week" through the end of next week.
 
 Deviations: no paid API — default provider is Groq/Cerebras free tier (`LLM_REASONING_EFFORT=low` for gpt-oss);
 Claude optional. Model IDs verified 2026-10-09: `claude-haiku-5-5` ($0.10/$0.50 per MTok), `claude-sonnet-5-5`

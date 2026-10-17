@@ -6,8 +6,9 @@
    wrapped as data).
 2. Up to MAX_TURNS times: ask the model (MAX_TOKENS output tokens per step, one budgeted call each); for
    each tool call → validate args (Pydantic, strict) → consult policy → run / queue / refuse → append the
-   result; stop when `finish` is called. Tool calls are forced; a cut-off or prose-only answer gets one nudge per
-   thread, except that a prose answer which is exactly the finish JSON counts as finish (and only finish).
+   result; stop when `finish` is called. Tool calls are forced; a cut-off or prose-only answer (including one that
+   Groq rejected with tool_use_failed) gets one nudge per thread, except that a prose answer which is exactly the
+   finish JSON, bare or in a ```json fence, counts as finish (and only finish).
 3. Everything is written to the trace; approval-level tools pass ownership + validity checks, are queued
    in the Store and run later via `resolve(action_id, approve=True)`.
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import time
 
 from pydantic import ValidationError
@@ -32,18 +34,26 @@ from .providers import MAX_TOKENS, Provider, ProviderError, StepResult, tool_res
 from .schema import AgentResult, Email, FinishArgs, PendingAction, ToolCall, ToolEvent
 from .tools import TOOLS, Context, new_thread_id, tool_specs
 
-PROMPT_VERSION = "2026-10-17.1"
+PROMPT_VERSION = "2026-10-17.2"
 NUDGE = "Use the tools. When done, call finish."
+_FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.DOTALL | re.IGNORECASE)  # a ```json fence holding exactly one object
 
 
-def date_list(today: dt.date, days: int = 14) -> str:
-    """'Mon 2026-10-19, Tue 2026-10-20, …': the model reads weekdays from here instead of computing them."""
-    return ", ".join(f"{weekday_name(d)} {d.isoformat()}" for d in (today + dt.timedelta(days=i) for i in range(days)))
+def date_list(today: dt.date) -> str:
+    """'This week: Mon 2026-10-19, …, Sun 2026-10-25. Next week: Mon 2026-10-26, …': the model reads weekdays and
+    the meaning of "next week" from here instead of computing them. This week starts at today (no past dates)."""
+    monday = today - dt.timedelta(days=today.weekday())
+    week = [monday + dt.timedelta(days=i) for i in range(14)]
+
+    def fmt(days: list[dt.date]) -> str:
+        return ", ".join(f"{weekday_name(d)} {d.isoformat()}" for d in days)
+
+    return f"This week: {fmt([d for d in week[:7] if d >= today])}. Next week: {fmt(week[7:])}"
 
 
 def system_prompt(today: dt.date) -> str:
     return f"""You are the email assistant of {COMPANY}. Today is {today.isoformat()} ({today.strftime('%A')}).
-The next 14 dates are: {date_list(today)}. Take weekday names from this list and from tool results.
+{date_list(today)}. Take weekday names from this list and from tool results; "next week" means the dates under Next week.
 You handle one customer email at a time by calling tools. Never answer from memory about prices, hours or
 policies: call search_kb and cite the chunk_id in draft_reply. Use lookup_customer before anything
 customer-specific. For bookings: find_slots first, then book_slot with a slot that was returned.
@@ -65,6 +75,9 @@ def finish_from_text(text: str) -> FinishArgs | None:
     as text now and then). Only finish: no other tool is ever accepted from text, so nothing with side effects can be
     triggered this way."""
     t = text.strip()
+    fenced = _FENCE.match(t)
+    if fenced:
+        t = fenced.group(1).strip()
     if not (t.startswith("{") and t.endswith("}")):
         return None
     try:
@@ -124,6 +137,8 @@ class Agent:
             if step.reasoning_chars is not None:
                 model_event["reasoning_chars"] = step.reasoning_chars
             store.append_trace(thread_id, model_event)
+            if step.tool_use_failed:  # Groq rejected the step because the model answered in text (see providers.py)
+                store.append_trace(thread_id, {"event": "tool_use_failed", "turn": turn, "chars": len(step.text)})
             if step.truncated:  # hit max_tokens: a cut tool call fails validation below; the nudge asks for a retry
                 store.append_trace(thread_id, {"event": "truncated", "turn": turn, "max_tokens": MAX_TOKENS})
             if not step.tool_calls:

@@ -11,8 +11,11 @@ provider converts both ways.
 * ``AnthropicProvider`` — Claude ``messages.create`` with ``tools=`` (input_schema), ``tool_choice={"type": "any"}``
   and ``tool_use`` / ``tool_result`` blocks.
 
-Tool calls are forced on every step: the loop ends only through ``finish``, so prose is never wanted. A provider's
-separate reasoning field (gpt-oss on Groq) is measured (``reasoning_chars``) but never stored.
+Tool calls are forced on every step: the loop ends only through ``finish``, so prose is never wanted. Groq checks
+``tool_choice="required"`` only after generating and answers HTTP 400 ``tool_use_failed`` with the model's text as
+``failed_generation``; that comes back as a prose-only ``StepResult`` (``tool_use_failed=True``) so the loop can apply
+its finish-from-text / nudge path instead of losing the thread. A provider's separate reasoning field (gpt-oss on
+Groq) is measured (``reasoning_chars``) but never stored.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ class StepResult:
     raw_assistant: dict = field(default_factory=dict)  # OpenAI-format assistant message to append
     truncated: bool = False  # hit max_tokens: tool-call JSON may be cut (it then fails validation in the loop)
     reasoning_chars: int | None = None  # length of the provider's separate reasoning field, when it returns one
+    tool_use_failed: bool = False  # Groq rejected the step because the model answered in text; ``text`` is that answer
 
 
 class Provider(Protocol):
@@ -61,6 +65,15 @@ def _wrap(exc: Exception) -> ProviderError:
     if status == 429 and any(k in msg.lower() for k in ("per day", "tpd", "daily")):
         return QuotaError(text)
     return ProviderError(text)
+
+
+def _tool_use_failed(exc: Exception) -> str | None:
+    """Groq's HTTP 400 ``tool_use_failed`` (tool_choice="required" but the model answered in text, or named a tool that
+    does not exist): returns the model's text (``failed_generation``); None for any other error."""
+    body = getattr(exc, "body", None)
+    if getattr(exc, "status_code", None) == 400 and isinstance(body, dict) and body.get("code") == "tool_use_failed":
+        return str(body.get("failed_generation") or "")
+    return None
 
 
 def tool_result_message(call_id: str, name: str, result) -> dict:
@@ -87,7 +100,11 @@ class OpenAICompatProvider:
         try:
             resp = self._client.chat.completions.create(**kwargs)
         except Exception as exc:
-            raise _wrap(exc) from exc
+            failed = _tool_use_failed(exc)
+            if failed is None:
+                raise _wrap(exc) from exc
+            # the model's text, handed to the loop as a prose-only step (no usage is reported for a rejected generation)
+            return StepResult(failed, [], 0, 0, time.perf_counter() - t0, {"role": "assistant", "content": failed}, tool_use_failed=True)
         elapsed = time.perf_counter() - t0
         choice = resp.choices[0]
         m = choice.message

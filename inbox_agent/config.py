@@ -62,7 +62,7 @@ class Settings:
     llm_reasoning_effort: str = field(default_factory=lambda: _env("LLM_REASONING_EFFORT", "low"))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY", ""))
     anthropic_model: str = field(default_factory=lambda: _env("ANTHROPIC_MODEL", "claude-haiku-5-5"))
-    max_turns: int = field(default_factory=lambda: int(_env("MAX_TURNS", "6")))
+    max_turns: int = field(default_factory=lambda: int(_env("MAX_TURNS", "8")))  # 8, not the spec's 6: see DESIGN.md "Turn limit"
     max_email_chars: int = field(default_factory=lambda: int(_env("MAX_EMAIL_CHARS", "2000")))
     max_daily_usd: float = field(default_factory=lambda: float(_env("MAX_DAILY_USD", "1")))
     max_daily_calls: int = field(default_factory=lambda: int(_env("MAX_DAILY_CALLS", "150")))
