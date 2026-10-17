@@ -18,6 +18,15 @@ trace. Swapping the model is one environment variable; swapping a tool is one fu
   misreport its own actions, so the model cannot claim "unfinished" either.
 - Tool arguments are strict (`extra="forbid"`, dates and datetimes validated in the model), so an unknown field or a
   malformed date is an error to the model, not a silently ignored input.
+- Tool calls are forced on every step (`tool_choice` "required" / "any"): the loop only ends through `finish`, so
+  prose is never wanted; the one nudge per thread stays as a fallback. A prose-only answer that is exactly one JSON
+  object validating as `FinishArgs` is accepted as `finish` and logged as `finish_from_text` (gpt-oss on Groq wrote
+  the finish payload as text in all six samples of the first live run). Nothing else is ever parsed from text, so no
+  action with side effects can come from prose.
+- The model never does date arithmetic: the prompt lists the next 14 dates with weekday names, and bookings, free
+  slots and queued actions carry `weekday` and `starts_in_hours` (hours from the agent's today at 00:00). The 24-hour
+  cancellation rule is decided from `starts_in_hours`. (First live run: a Thursday was called "Tuesday" and a booking
+  two days away was put inside the 24-hour window.)
 - Ownership checks live in the tools: lookup_customer only returns the sender's own record, a customer can only
   cancel their own bookings, book_slot refuses a customer_id that does not match the sender.
 - Suspicious emails: lexical markers (cheap, transparent) flag the thread; approval tools are refused for the
@@ -35,14 +44,24 @@ clock, so runs with `--today` are reproducible.
 
 ## Knowledge base
 BM25 over heading-level chunks of nine markdown pages; chunk ids like `prices#price-list` are what drafts cite.
+Stopwords include the clinic name (nova, dental, clinic), so a query such as "cancellation fee policy Nova Dental
+Clinic" is not pulled towards the address page.
 A draft may cite only chunk ids that `search_kb` returned earlier in the same thread (anything else comes back as
-`ignored_citations`); a draft that mentions money, hours or policy without such a citation is flagged `unverified_claim`.
+`ignored_citations`). `unverified_claim` rule: the draft contains an amount (₺, €, TL, EUR, or a number followed by
+TL/₺) or a policy phrase ("free of charge", "charged", "fee of", "within 24 hours", "open on", "closed on") and no
+accepted citation. Bare words such as "refund", "cancellation" or "price" are mentions, not claims, and do not trigger it.
 
 ## Cost accounting
 Measured tokens × list prices (`costs.py`); free tiers labelled "free tier"; Claude Haiku quoted "as if" so a
 paying client can compare. Daily caps on both dollars (`MAX_DAILY_USD`) and provider calls (`MAX_DAILY_CALLS`, 150),
 one call recorded per agent step; on the free tier only the call cap bites. Each step allows 1,500 output tokens;
 a cut-off answer is logged as a `truncated` trace event and the model is nudged once.
+
+## Trace
+One JSONL file per thread: `start`, one `model` event per step (text, tool calls, tokens, `latency_s`, and
+`reasoning_chars` when the provider returns a separate reasoning field, length only), one event per tool call with its
+status, `truncated` / `finish_from_text` / `error` when they happen, `approved` / `rejected` on resolution, and `end`
+with the result.
 
 ## Findings
 _Milestone 3._

@@ -19,6 +19,12 @@ from .config import CALENDAR_JSON
 
 OPENING = {0: (9, 18), 1: (9, 18), 2: (9, 18), 3: (9, 18), 4: (9, 18), 5: (10, 14)}  # weekday → (open, close); 6 = Sunday closed
 GRID_MIN = 30
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def weekday_name(d: date | datetime) -> str:
+    """Locale-independent short weekday name ("Tue"), used in the prompt and in tool results."""
+    return WEEKDAYS[d.weekday()]
 
 
 class Calendar(Protocol):

@@ -6,7 +6,7 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestone 1 is implemented, tested (34 tests, no network) and hardened; most of Milestone 2 too. Start at
+**Milestone 1 is implemented, tested (42 tests, no network) and hardened; most of Milestone 2 too. Start at
 "Milestone 2, step 0" below.**
 
 Implemented:
@@ -20,7 +20,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (34) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (42) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.

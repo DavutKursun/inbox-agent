@@ -7,9 +7,12 @@ input_tokens, output_tokens, elapsed, raw_assistant, truncated)``; ``truncated``
 provider converts both ways.
 
 * ``OpenAICompatProvider`` — Groq / Cerebras / any OpenAI-compatible endpoint (``tools=``,
-  ``tool_choice="auto"``, optional ``reasoning_effort``).
-* ``AnthropicProvider`` — Claude ``messages.create`` with ``tools=`` (input_schema) and
-  ``tool_use`` / ``tool_result`` blocks.
+  ``tool_choice="required"``, optional ``reasoning_effort``).
+* ``AnthropicProvider`` — Claude ``messages.create`` with ``tools=`` (input_schema), ``tool_choice={"type": "any"}``
+  and ``tool_use`` / ``tool_result`` blocks.
+
+Tool calls are forced on every step: the loop ends only through ``finish``, so prose is never wanted. A provider's
+separate reasoning field (gpt-oss on Groq) is measured (``reasoning_chars``) but never stored.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ class StepResult:
     elapsed_seconds: float
     raw_assistant: dict = field(default_factory=dict)  # OpenAI-format assistant message to append
     truncated: bool = False  # hit max_tokens: tool-call JSON may be cut (it then fails validation in the loop)
+    reasoning_chars: int | None = None  # length of the provider's separate reasoning field, when it returns one
 
 
 class Provider(Protocol):
@@ -76,7 +80,7 @@ class OpenAICompatProvider:
         self._client, self.model, self.reasoning_effort = client, model, reasoning_effort
 
     def step(self, messages: list[dict], tools: list[dict], max_tokens: int = MAX_TOKENS) -> StepResult:
-        kwargs = dict(model=self.model, messages=messages, tools=tools, tool_choice="auto", max_tokens=max_tokens, temperature=0)
+        kwargs = dict(model=self.model, messages=messages, tools=tools, tool_choice="required", max_tokens=max_tokens, temperature=0)
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
         t0 = time.perf_counter()
@@ -100,8 +104,10 @@ class OpenAICompatProvider:
         if raw_calls:
             raw["tool_calls"] = raw_calls
         u = resp.usage
+        reasoning = getattr(m, "reasoning", None)  # gpt-oss on Groq returns its reasoning here; we log only its length
         return StepResult(m.content or "", calls, int(getattr(u, "prompt_tokens", 0) or 0), int(getattr(u, "completion_tokens", 0) or 0), elapsed, raw,
-                          truncated=getattr(choice, "finish_reason", None) == "length")
+                          truncated=getattr(choice, "finish_reason", None) == "length",
+                          reasoning_chars=len(reasoning) if isinstance(reasoning, str) else None)
 
 
 class AnthropicProvider:
@@ -151,14 +157,17 @@ class AnthropicProvider:
         system, msgs = self._convert(messages)
         t0 = time.perf_counter()
         try:
-            resp = self._client.messages.create(model=self.model, max_tokens=max_tokens, system=system, messages=msgs, tools=self._tools(tools))
+            resp = self._client.messages.create(model=self.model, max_tokens=max_tokens, system=system, messages=msgs, tools=self._tools(tools),
+                                                tool_choice={"type": "any"})
         except Exception as exc:
             raise _wrap(exc) from exc
         elapsed = time.perf_counter() - t0
-        text, calls, raw_calls = "", [], []
+        text, calls, raw_calls, thinking = "", [], [], None
         for b in resp.content:
             if b.type == "text":
                 text += b.text
+            elif b.type == "thinking":  # only if extended thinking is ever enabled; length only
+                thinking = (thinking or 0) + len(getattr(b, "thinking", "") or "")
             elif b.type == "tool_use":
                 calls.append(ToolCall(id=b.id, name=b.name, args=dict(b.input)))
                 raw_calls.append({"id": b.id, "type": "function", "function": {"name": b.name, "arguments": json.dumps(b.input)}})
@@ -166,7 +175,7 @@ class AnthropicProvider:
         if raw_calls:
             raw["tool_calls"] = raw_calls
         return StepResult(text, calls, resp.usage.input_tokens, resp.usage.output_tokens, elapsed, raw,
-                          truncated=getattr(resp, "stop_reason", None) == "max_tokens")
+                          truncated=getattr(resp, "stop_reason", None) == "max_tokens", reasoning_chars=thinking)
 
 
 def get_provider(cfg) -> Provider:

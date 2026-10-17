@@ -14,7 +14,8 @@ from pathlib import Path
 from .config import KB_DIR
 
 _TOKEN = re.compile(r"[a-z0-9çğıöşü]+")
-_STOP = set("a an the and or of to in on at for by with is are be do does how much many what when where which who can i my me you your we our it this that there please".split())
+# Stopwords include the clinic name: "… Nova Dental Clinic" in a query must not pull the address page to the top.
+_STOP = set("a an the and or of to in on at for by with is are be do does how much many what when where which who can i my me you your we our it this that there please nova dental clinic".split())
 
 
 def tokenize(text: str) -> list[str]:

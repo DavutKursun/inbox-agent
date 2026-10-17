@@ -3,7 +3,8 @@
 Usage: python scripts/run_one.py data/samples/booking.json [--today 2026-10-19]
 --today defaults to the date in data/fixtures_today.txt (written by make_fixtures.py), so the calendar and the
 sample emails stay consistent however long after generation the agent runs.
-Exit codes: 0 ok, 2 not configured, 4 API error.
+Exit codes: 0 ok, 2 not configured, 4 API error (the thread stopped on a provider error; it is reported as
+intent "unfinished" + escalated, see the ESCALATED line).
 """
 
 from __future__ import annotations
@@ -39,24 +40,24 @@ def default_ctx_factory(today: dt.date | None = None):
     return make
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, *, provider=None, ctx_factory=None, budget: BudgetGuard | None = None) -> int:
+    """CLI entry point. ``provider``, ``ctx_factory`` and ``budget`` default to the configured ones; tests inject fakes."""
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
     ap.add_argument("--today", default=None, help="YYYY-MM-DD; default: data/fixtures_today.txt, else the real date")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     today = dt.date.fromisoformat(args.today) if args.today else fixtures_today()
-    try:
-        provider = get_provider(settings)
-    except ProviderError as e:
-        print("not configured:", e)
-        return 2
+    if provider is None:
+        try:
+            provider = get_provider(settings)
+        except ProviderError as e:
+            print("not configured:", e)
+            return 2
+    if budget is None:
+        budget = BudgetGuard(settings.budget_file, settings.max_daily_usd, settings.max_daily_calls)
     email = Email.model_validate(json.loads(Path(args.file).read_text(encoding="utf-8")))
-    agent = Agent(provider, default_ctx_factory(today), budget=BudgetGuard(settings.budget_file, settings.max_daily_usd, settings.max_daily_calls), today=today)
-    try:
-        res = agent.handle(email)
-    except ProviderError as e:
-        print("API error:", e)
-        return 4
+    agent = Agent(provider, ctx_factory or default_ctx_factory(today), budget=budget, today=today)
+    res = agent.handle(email)  # provider errors never raise: the loop records them (stopped_reason "error")
     print(f"\n=== {res.intent}  ({res.stopped_reason}, {res.turns} turns, {res.input_tokens}+{res.output_tokens} tokens, "
           f"{format_cost(res.model, res.cost_usd)}, {res.latency_ms:.0f} ms)")
     print("summary:", res.summary)
@@ -70,6 +71,9 @@ def main() -> int:
         d = res.draft_reply
         print(f"\n--- draft: {d.subject}  (citations: {d.citations}{', UNVERIFIED CLAIM' if d.unverified_claim else ''})\n{d.body}")
     print("\ntrace:", agent.ctx_factory(res.thread_id, email.from_email).store.trace_path(res.thread_id))
+    if res.stopped_reason == "error":
+        print("API error: the thread stopped on a provider error (see ESCALATED above)")
+        return 4
     return 0
 
 

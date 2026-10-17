@@ -11,12 +11,12 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from .calendar import GRID_MIN, Calendar
+from .calendar import GRID_MIN, Calendar, weekday_name
 from .config import VISIT_MINUTES
 from .crm import CRM
 from .kb import KnowledgeBase
@@ -48,9 +48,20 @@ class Tool:
     args_model: type[BaseModel]
     run: Callable[[BaseModel, Context], Any]
     check: Callable[[BaseModel, Context], str | None] | None = None  # approval-level only: error string → not queued
+    preview: Callable[[BaseModel, Context], dict] | None = None  # approval-level only: facts merged into the "queued" result
 
 
 # --- implementations --------------------------------------------------------------
+def _hours_from_today(today: date, start_iso: str) -> float:
+    """Hours from the agent's today at 00:00 to a start time: the model reads this instead of doing date arithmetic."""
+    return round((datetime.fromisoformat(start_iso) - datetime.combine(today, time(0, 0))).total_seconds() / 3600, 1)
+
+
+def _with_dates(ctx: Context, item: dict, key: str = "start") -> dict:
+    """Add "weekday" and "starts_in_hours" to a booking / slot / queued action, computed from its ``key`` datetime."""
+    return {**item, "weekday": weekday_name(datetime.fromisoformat(item[key])), "starts_in_hours": _hours_from_today(ctx.today, item[key])}
+
+
 def _lookup_customer(a: LookupCustomerArgs, ctx: Context):
     if a.email.lower() != ctx.customer_email.lower():  # the sender's own record only: no browsing other customers
         return {"error": "can only look up the sender"}
@@ -59,6 +70,7 @@ def _lookup_customer(a: LookupCustomerArgs, ctx: Context):
         return {"found": False}
     rec = dict(rec)
     rec["found"] = True
+    rec["bookings"] = [_with_dates(ctx, b) for b in rec["bookings"]]
     return rec
 
 
@@ -70,7 +82,7 @@ def _search_kb(a: SearchKBArgs, ctx: Context):
 
 def _find_slots(a: FindSlotsArgs, ctx: Context):
     d0, d1 = date.fromisoformat(a.date_from), date.fromisoformat(a.date_to)
-    return {"slots": ctx.calendar.find_slots(d0, d1, a.duration_min)}
+    return {"slots": [_with_dates(ctx, s) for s in ctx.calendar.find_slots(d0, d1, a.duration_min)]}
 
 
 def _book_slot(a: BookSlotArgs, ctx: Context):
@@ -119,7 +131,20 @@ def _check_cancel_booking(a: CancelBookingArgs, ctx: Context) -> str | None:
     return None
 
 
-_CLAIM_WORDS = re.compile(r"\b(₺|\$|€|TL|price|cost|fee|policy|hours|open|close|cancellation|refund|insurance|parking)\b", re.I)
+# --- queued-result previews: facts the model needs right after queuing (dates it must not compute itself) ---------
+def _preview_book_slot(a: BookSlotArgs, ctx: Context) -> dict:
+    return _with_dates(ctx, {"start": a.start})
+
+
+def _preview_cancel_booking(a: CancelBookingArgs, ctx: Context) -> dict:
+    rec = ctx.crm.lookup(ctx.customer_email) or {"bookings": []}
+    booking = next(b for b in rec["bookings"] if b["id"] == a.booking_id)  # exists: the check ran first
+    return _with_dates(ctx, {"booking_start": booking["start"]}, key="booking_start")
+
+
+# A draft "states a price or policy" when it contains an amount (₺, €, TL, EUR, a number followed by TL/₺) or one of these
+# policy phrases. Bare words such as "refund", "cancellation" or "price" are mentions, not claims. Documented in docs/DESIGN.md.
+_CLAIM_WORDS = re.compile(r"₺|€|\bTL\b|\bEUR\b|\d[\d.,]*\s?(?:TL|₺)|\bfree of charge\b|\bcharged\b|\bfee of\b|\bwithin 24 hours\b|\bopen on\b|\bclosed on\b", re.I)
 
 
 def _draft_reply(a: DraftReplyArgs, ctx: Context):
@@ -144,9 +169,10 @@ TOOLS: dict[str, Tool] = {
     "lookup_customer": Tool("lookup_customer", "Find the sender's customer record (and bookings). Only the sender's own address can be looked up.", LookupCustomerArgs, _lookup_customer),
     "search_kb": Tool("search_kb", "Search the clinic knowledge base (hours, prices, policies). Cite the returned chunk_id in drafts.", SearchKBArgs, _search_kb),
     "find_slots": Tool("find_slots", f"List free appointment slots between two dates (default {VISIT_MINUTES} min).", FindSlotsArgs, _find_slots),
-    "book_slot": Tool("book_slot", "Book a slot returned by find_slots for the sender. Queued for human approval.", BookSlotArgs, _book_slot, _check_book_slot),
+    "book_slot": Tool("book_slot", "Book a slot returned by find_slots for the sender. Queued for human approval.", BookSlotArgs, _book_slot, _check_book_slot,
+                      _preview_book_slot),
     "cancel_booking": Tool("cancel_booking", "Cancel one of the sender's confirmed bookings. Queued for human approval.", CancelBookingArgs, _cancel_booking,
-                           _check_cancel_booking),
+                           _check_cancel_booking, _preview_cancel_booking),
     "draft_reply": Tool("draft_reply", "Save the reply draft (not sent). Cite chunk_ids returned by search_kb in this thread for any price/policy statement.", DraftReplyArgs, _draft_reply),
     "escalate": Tool("escalate", "Hand the thread to a human: complaints, legal, refunds, anything unclear or suspicious.", EscalateArgs, _escalate),
     "finish": Tool("finish", "End the thread with the detected intent and a one-line summary.", FinishArgs, _finish),
