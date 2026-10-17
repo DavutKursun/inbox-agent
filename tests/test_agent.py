@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -8,7 +9,7 @@ import pytest
 from openai import BadRequestError
 from pydantic import ValidationError
 
-from inbox_agent.agent import NUDGE, PROMPT_VERSION, Agent, finish_from_text, system_prompt
+from inbox_agent.agent import MAX_NUDGES, NUDGE, PROMPT_VERSION, Agent, finish_from_text, system_prompt
 from inbox_agent.calendar import FakeCalendar
 from inbox_agent.config import Settings
 from inbox_agent.costs import BudgetGuard
@@ -441,6 +442,15 @@ def test_finish_from_text_is_accepted_only_for_finish(world):
         res = Agent(ScriptedProvider([text]), world["factory"], today=TODAY).handle(_email("hours?"))
         assert res.stopped_reason == "no_tool_calls" and res.intent == "unfinished" and res.actions_pending == [] and world["store"].pending() == [], text
     assert finish_from_text(' {"intent": "billing", "summary": "invoice copy requested"} ').intent == "billing"
+    # wrapped payloads, finish only
+    for text in ('{"finish": {"intent": "reschedule_cancel", "summary": "cancellation queued, no fee"}}',
+                 '{"name": "finish", "arguments": {"intent": "reschedule_cancel", "summary": "cancellation queued, no fee"}}',
+                 '{"name": "finish", "arguments": "{\\"intent\\": \\"reschedule_cancel\\", \\"summary\\": \\"cancellation queued, no fee\\"}"}'):
+        assert finish_from_text(text).intent == "reschedule_cancel", text
+    for text in ('{"name": "book_slot", "arguments": {"customer_id": 1, "start": "2026-10-13T09:00"}}',
+                 '{"finish": {"intent": "billing", "summary": "x y z"}, "draft_reply": {"body": "..."}}',
+                 '{"name": "finish", "arguments": {"intent": "billing", "summary": "x y z"}, "extra": 1}'):
+        assert finish_from_text(text) is None, text
 
 
 def test_prompt_lists_dates_and_live_run_rules():
@@ -515,7 +525,9 @@ def test_provider_turns_groq_tool_use_failed_into_a_prose_step():
     groq = {"message": "Tool choice is required, but model did not call a tool", "type": "invalid_request_error", "code": "tool_use_failed",
             "failed_generation": failed}
     r = OpenAICompatProvider("k", "http://localhost:9", "m", client=client_raising(groq)).step([{"role": "user", "content": "hi"}], tool_specs())
-    assert r.tool_use_failed and r.text == failed and r.tool_calls == [] and (r.input_tokens, r.output_tokens) == (0, 0)
+    assert r.tool_use_failed and r.text == failed and r.tool_calls == [] and r.estimated_tokens
+    assert r.output_tokens == len(failed) // 4 > 0
+    assert r.input_tokens == (len(json.dumps([{"role": "user", "content": "hi"}], ensure_ascii=False)) + len(json.dumps(tool_specs(), ensure_ascii=False))) // 4
     assert r.raw_assistant == {"role": "assistant", "content": failed}
     other = {"message": "context too long", "type": "invalid_request_error", "code": "context_length_exceeded"}
     with pytest.raises(ProviderError, match="HTTP 400"):
@@ -535,7 +547,8 @@ class FailedThenScripted:
         self.n += 1
         if self.n == 1:
             self.seen.append([dict(m) for m in messages])
-            return StepResult(self.text, [], 0, 0, 0.01, {"role": "assistant", "content": self.text}, tool_use_failed=True)
+            return StepResult(self.text, [], 400, len(self.text) // 4, 0.01, {"role": "assistant", "content": self.text}, tool_use_failed=True,
+                              estimated_tokens=True)
         return self.inner.step(messages, tools, max_tokens)
 
 
@@ -544,8 +557,12 @@ def test_loop_recovers_from_tool_use_failed_steps(world):
     p = FailedThenScripted('{"intent": "complaint", "summary": "escalated to the manager"}', [])
     res = Agent(p, world["factory"], today=TODAY).handle(_email("I am furious"))
     assert res.stopped_reason == "finish" and res.intent == "complaint" and res.turns == 1 and not res.escalated
-    kinds = [e.get("event") for e in world["store"].read_trace(res.thread_id)]
+    trace = world["store"].read_trace(res.thread_id)
+    kinds = [e.get("event") for e in trace]
     assert kinds.index("tool_use_failed") < kinds.index("finish_from_text")
+    model = next(e for e in trace if e.get("event") == "model")
+    assert model["estimated"] is True and model["tokens"] == [400, len(p.text) // 4]
+    assert (res.input_tokens, res.output_tokens) == (400, len(p.text) // 4)  # estimated tokens count in the result
     # the rejected text is Groq's "commentary" pseudo call: not a finish, one nudge, then the model finishes by tool
     bogus = '{"name": "commentary", "arguments": {"draft_reply": {"body": "..."}, "finish": {"intent": "billing", "summary": "x"}}}'
     p = FailedThenScripted(bogus, [[("draft_reply", {"subject": "Re", "body": "We will send the invoice copy."}),
@@ -560,3 +577,23 @@ def test_max_turns_default_is_8(monkeypatch):
     assert Settings().max_turns == 8
     monkeypatch.setenv("MAX_TURNS", "6")
     assert Settings().max_turns == 6
+
+
+# --- M2: nudge budget --------------------------------------------------------------------------------------
+def test_nudge_budget_resets_after_tool_steps(world):
+    search = [("search_kb", {"query": "hours"})]
+    fin = [("finish", {"intent": "question", "summary": "hours answered"})]
+    # prose, tool, prose, tool, prose, tool, finish: a nudge after each prose step, three in all, and the thread finishes
+    p = ScriptedProvider(["thinking...", search, "still thinking", search, "hmm", search, fin])
+    res = Agent(p, world["factory"], max_turns=10, today=TODAY).handle(_email("hours?"))
+    assert res.stopped_reason == "finish" and res.turns == 7 and not res.escalated
+    assert sum(m.get("content") == NUDGE for m in p.seen[-1]) == MAX_NUDGES == 3
+    # a fourth prose step after the budget is spent: stop, escalate
+    p = ScriptedProvider(["a", search, "b", search, "c", search, "d", fin])
+    res = Agent(p, world["factory"], max_turns=10, today=TODAY).handle(_email("hours?"))
+    assert res.stopped_reason == "no_tool_calls" and res.turns == 7
+    assert res.escalation_reason == "agent did not finish: nudge budget (3) exhausted"
+    # two prose steps in a row still stop at once
+    p = ScriptedProvider(["a", "b", search, fin])
+    res = Agent(p, world["factory"], max_turns=10, today=TODAY).handle(_email("hours?"))
+    assert res.stopped_reason == "no_tool_calls" and res.turns == 2 and "prose twice" in res.escalation_reason

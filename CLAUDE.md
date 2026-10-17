@@ -6,7 +6,7 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestone 1 is implemented, tested (45 tests, no network) and hardened; most of Milestone 2 too. Start at
+**Milestone 1 is implemented, tested (46 tests, no network) and hardened; most of Milestone 2 too. Start at
 "Milestone 2, step 0" below.**
 
 Implemented:
@@ -20,7 +20,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (45) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (46) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
@@ -38,10 +38,13 @@ Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4;
 Live-run fixes (2026-10-17, gpt-oss-120b on Groq; traces in docs/DESIGN.md):
 - `a9447c3` forced tool calls, finish-from-text fallback, weekday + `starts_in_hours` in tool results, billing path in
   the prompt, clinic name as KB stopwords, narrower unverified-claim rule, per-step latency + reasoning length in traces.
-- The commit adding this note: Groq's HTTP 400 `tool_use_failed` becomes a prose-only step instead of killing the
-  thread, finish JSON accepted inside a ```json fence, **MAX_TURNS default 8** (spec says 6: this model makes one tool
-  call per turn, so lookup + three searches + draft + finish already fill six), prompt date list labelled
-  "This week / Next week" through the end of next week.
+- `fe7ae5b` Groq's HTTP 400 `tool_use_failed` becomes a prose-only step instead of killing the thread, finish JSON
+  accepted inside a ```json fence, **MAX_TURNS default 8** (spec says 6: this model makes one tool call per turn, so
+  lookup + three searches + draft + finish already fill six), prompt date list labelled "This week / Next week"
+  through the end of next week.
+- The commit adding this note: nudge budget (one per prose step, reset after a tool step, max 3 per thread), finish
+  accepted from `{"finish": …}` / `{"name": "finish", "arguments": …}` wrappers, estimated tokens (chars / 4,
+  flagged) for steps Groq rejected.
 
 Deviations: no paid API — default provider is Groq/Cerebras free tier (`LLM_REASONING_EFFORT=low` for gpt-oss);
 Claude optional. Model IDs verified 2026-10-09: `claude-haiku-5-5` ($0.10/$0.50 per MTok), `claude-sonnet-5-5`

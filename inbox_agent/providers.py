@@ -14,8 +14,9 @@ provider converts both ways.
 Tool calls are forced on every step: the loop ends only through ``finish``, so prose is never wanted. Groq checks
 ``tool_choice="required"`` only after generating and answers HTTP 400 ``tool_use_failed`` with the model's text as
 ``failed_generation``; that comes back as a prose-only ``StepResult`` (``tool_use_failed=True``) so the loop can apply
-its finish-from-text / nudge path instead of losing the thread. A provider's separate reasoning field (gpt-oss on
-Groq) is measured (``reasoning_chars``) but never stored.
+its finish-from-text / nudge path instead of losing the thread. Groq reports no usage for such a step, so its tokens
+are estimated (characters / 4 of the request and of the text) and flagged ``estimated_tokens``. A provider's separate
+reasoning field (gpt-oss on Groq) is measured (``reasoning_chars``) but never stored.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ class StepResult:
     truncated: bool = False  # hit max_tokens: tool-call JSON may be cut (it then fails validation in the loop)
     reasoning_chars: int | None = None  # length of the provider's separate reasoning field, when it returns one
     tool_use_failed: bool = False  # Groq rejected the step because the model answered in text; ``text`` is that answer
+    estimated_tokens: bool = False  # token counts are a characters / 4 estimate (no usage reported for the step)
 
 
 class Provider(Protocol):
@@ -65,6 +67,11 @@ def _wrap(exc: Exception) -> ProviderError:
     if status == 429 and any(k in msg.lower() for k in ("per day", "tpd", "daily")):
         return QuotaError(text)
     return ProviderError(text)
+
+
+def estimate_tokens(*parts) -> int:
+    """Rough token count (characters / 4) for text a provider reports no usage for; strings as is, anything else as JSON."""
+    return sum(len(p if isinstance(p, str) else json.dumps(p, ensure_ascii=False)) for p in parts) // 4
 
 
 def _tool_use_failed(exc: Exception) -> str | None:
@@ -103,8 +110,9 @@ class OpenAICompatProvider:
             failed = _tool_use_failed(exc)
             if failed is None:
                 raise _wrap(exc) from exc
-            # the model's text, handed to the loop as a prose-only step (no usage is reported for a rejected generation)
-            return StepResult(failed, [], 0, 0, time.perf_counter() - t0, {"role": "assistant", "content": failed}, tool_use_failed=True)
+            # the model's text, handed to the loop as a prose-only step; no usage is reported, so tokens are estimated
+            return StepResult(failed, [], estimate_tokens(messages, tools), estimate_tokens(failed), time.perf_counter() - t0,
+                              {"role": "assistant", "content": failed}, tool_use_failed=True, estimated_tokens=True)
         elapsed = time.perf_counter() - t0
         choice = resp.choices[0]
         m = choice.message

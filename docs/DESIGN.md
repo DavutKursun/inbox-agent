@@ -11,7 +11,8 @@ trace. Swapping the model is one environment variable; swapping a tool is one fu
   customer it is pending. A failed check is an error to the model and never reaches the queue.
 - Approval never raises: if the tool fails at execution time (the slot was taken meanwhile, a stale id) the action
   becomes "failed" with the error in its result, visible in the queue and the trace.
-- No silent stops: a thread that hits the turn limit, a provider error or two prose-only answers is escalated with
+- No silent stops: a thread that hits the turn limit, a provider error, two prose-only answers in a row or the nudge
+  budget (one nudge per prose step, allowed again after any tool step, at most three per thread) is escalated with
   "agent did not finish: …" so a human always picks it up, and its intent is "unfinished", never a guess.
 - The loop computes `actions_taken` and `actions_pending` itself from what it executed and queued; `finish` only
   takes `intent` and `summary`. The spec's `finish(summary, actions_taken, actions_pending)` would let the model
@@ -22,11 +23,15 @@ trace. Swapping the model is one environment variable; swapping a tool is one fu
   prose is never wanted; the one nudge per thread stays as a fallback. A prose-only answer that is exactly one JSON
   object validating as `FinishArgs` is accepted as `finish` and logged as `finish_from_text` (gpt-oss on Groq wrote
   the finish payload as text in all six samples of the first live run); a ```json fence around exactly one object is
-  accepted too. Nothing else is ever parsed from text, so no action with side effects can come from prose.
+  accepted too, and so are the wrappers `{"finish": {…}}` and `{"name": "finish", "arguments": {…}}` that the third
+  run produced. Nothing else is ever parsed from text, and a payload that bundles finish with another tool is rejected,
+  so no action with side effects can come from prose.
 - Groq checks `tool_choice="required"` only after generating: when the model answers in text (or names a tool that
   does not exist, such as gpt-oss's "commentary" channel), Groq returns HTTP 400 `tool_use_failed` with the text as
   `failed_generation`. The provider turns that into a prose-only step (trace event `tool_use_failed`) so the finish
   fallback or the nudge apply; in the second live run every one of the six threads had died on this error instead.
+  Groq reports no usage for a rejected generation, so that step's tokens are estimated at characters / 4 of the request
+  and of the text, flagged `estimated` in the trace and counted in the result.
 - The model never does date arithmetic: the prompt lists the next 14 dates with weekday names, and bookings, free
   slots and queued actions carry `weekday` and `starts_in_hours` (hours from the agent's today at 00:00). The 24-hour
   cancellation rule is decided from `starts_in_hours`. (First live run: a Thursday was called "Tuesday" and a booking

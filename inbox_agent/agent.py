@@ -7,8 +7,9 @@
 2. Up to MAX_TURNS times: ask the model (MAX_TOKENS output tokens per step, one budgeted call each); for
    each tool call → validate args (Pydantic, strict) → consult policy → run / queue / refuse → append the
    result; stop when `finish` is called. Tool calls are forced; a cut-off or prose-only answer (including one that
-   Groq rejected with tool_use_failed) gets one nudge per thread, except that a prose answer which is exactly the
-   finish JSON, bare or in a ```json fence, counts as finish (and only finish).
+   Groq rejected with tool_use_failed) gets a nudge, one per prose step, reset after any tool step, at most
+   MAX_NUDGES per thread, except that a prose answer which is the finish JSON (bare, fenced, or wrapped as
+   {"finish": …} / {"name": "finish", "arguments": …}) counts as finish (and only finish).
 3. Everything is written to the trace; approval-level tools pass ownership + validity checks, are queued
    in the Store and run later via `resolve(action_id, approve=True)`.
 
@@ -36,6 +37,7 @@ from .tools import TOOLS, Context, new_thread_id, tool_specs
 
 PROMPT_VERSION = "2026-10-17.2"
 NUDGE = "Use the tools. When done, call finish."
+MAX_NUDGES = 3  # per thread; a nudge is sent once per prose step and allowed again after a tool step
 _FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.DOTALL | re.IGNORECASE)  # a ```json fence holding exactly one object
 
 
@@ -72,8 +74,9 @@ Always end with exactly one finish call. Keep drafts short, warm and specific; s
 
 def finish_from_text(text: str) -> FinishArgs | None:
     """A prose-only answer that is exactly one JSON object validating as FinishArgs counts as finish (gpt-oss writes it
-    as text now and then). Only finish: no other tool is ever accepted from text, so nothing with side effects can be
-    triggered this way."""
+    as text now and then): bare, inside a ```json fence, or wrapped as {"finish": {…}} or
+    {"name": "finish", "arguments": {…}}. Only finish: no other tool is ever accepted from text, so nothing with side
+    effects can be triggered this way, and a payload that bundles finish with anything else is rejected."""
     t = text.strip()
     fenced = _FENCE.match(t)
     if fenced:
@@ -82,6 +85,10 @@ def finish_from_text(text: str) -> FinishArgs | None:
         return None
     try:
         obj = json.loads(t)
+        if isinstance(obj, dict) and set(obj) == {"finish"}:
+            obj = obj["finish"]
+        elif isinstance(obj, dict) and set(obj) == {"name", "arguments"} and obj["name"] == "finish":
+            obj = json.loads(obj["arguments"]) if isinstance(obj["arguments"], str) else obj["arguments"]
         return FinishArgs.model_validate(obj) if isinstance(obj, dict) else None
     except (ValueError, ValidationError):
         return None
@@ -120,7 +127,8 @@ class Agent:
         pending: list[PendingAction] = []
         tin = tout = 0
         t0 = time.perf_counter()
-        stopped, why, nudged = "max_turns", f"max turns ({self.max_turns}) reached", False
+        stopped, why = "max_turns", f"max turns ({self.max_turns}) reached"
+        nudges, streak = 0, False  # nudges sent in this thread; streak: the previous step was prose and got a nudge
         for turn in range(1, self.max_turns + 1):
             try:
                 step: StepResult = self.provider.step(messages, self.specs, max_tokens=MAX_TOKENS)
@@ -136,6 +144,8 @@ class Agent:
                            "tokens": [step.input_tokens, step.output_tokens], "latency_s": round(step.elapsed_seconds, 2)}
             if step.reasoning_chars is not None:
                 model_event["reasoning_chars"] = step.reasoning_chars
+            if step.estimated_tokens:
+                model_event["estimated"] = True
             store.append_trace(thread_id, model_event)
             if step.tool_use_failed:  # Groq rejected the step because the model answered in text (see providers.py)
                 store.append_trace(thread_id, {"event": "tool_use_failed", "turn": turn, "chars": len(step.text)})
@@ -148,12 +158,17 @@ class Agent:
                     store.append_trace(thread_id, {"event": "finish_from_text", "turn": turn, "intent": fin.intent, "summary": fin.summary})
                     stopped = "finish"
                     break
-                if nudged:  # a second prose-only (or cut-off) answer: stop and let a human take over
-                    stopped, why = "no_tool_calls", ("model output was truncated twice" if step.truncated else "model answered in prose twice without calling tools")
+                if streak or nudges >= MAX_NUDGES:  # prose right after a nudge, or out of nudges: a human takes over
+                    stopped = "no_tool_calls"
+                    if not streak:
+                        why = f"nudge budget ({MAX_NUDGES}) exhausted"
+                    else:
+                        why = "model output was truncated twice" if step.truncated else "model answered in prose twice without calling tools"
                     break
                 messages.append({"role": "user", "content": NUDGE})
-                nudged = True
+                nudges, streak = nudges + 1, True
                 continue
+            streak = False  # a tool step: the next prose answer may be nudged again
             finished = False
             for call in step.tool_calls:
                 ev = self._execute(call, ctx, turn, suspicious, pending)
@@ -165,9 +180,9 @@ class Agent:
             if finished:
                 stopped = "finish"
                 break
-            if step.truncated and not nudged:  # the complete calls ran; ask once for the rest
+            if step.truncated and nudges < MAX_NUDGES:  # the complete calls ran; ask for the rest
                 messages.append({"role": "user", "content": NUDGE})
-                nudged = True
+                nudges, streak = nudges + 1, True
         if suspicious and not ctx.escalation:
             ctx.escalation = "suspicious content in email (automatic)"
         if stopped != "finish":  # no silent stops: an unfinished thread always reaches a human
