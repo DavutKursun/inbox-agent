@@ -6,8 +6,8 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestone 1 is implemented, tested (46 tests, no network) and hardened; most of Milestone 2 too. Start at
-"Milestone 2, step 0" below.**
+**Milestones 1 and 2 are done (48 tests, no network; the loop verified on the six live samples). Start at
+"Milestone 3, step 0" below.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -20,7 +20,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (46) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (48) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
@@ -48,18 +48,27 @@ Live-run fixes (2026-10-17, gpt-oss-120b on Groq; traces in docs/DESIGN.md):
 
 Deviations: no paid API — default provider is Groq/Cerebras free tier (`LLM_REASONING_EFFORT=low` for gpt-oss);
 Claude optional. Model IDs verified 2026-10-09: `claude-haiku-5-5` ($0.10/$0.50 per MTok), `claude-sonnet-5-5`
-($2/$10) — never downgrade without asking. Groq quota (200k tokens/day) is shared with other projects: ask Davut
-before any run above ~50 calls.
+($2/$10) — never downgrade without asking. Groq free-tier quotas are per model (200k tokens/day each) and shared with
+other projects: ask Davut before any run above ~50 calls. `MAX_TURNS` default is 8, not the 6 of §2/§4: gpt-oss-120b
+makes one tool call per turn, so lookup + three searches + draft + finish already fill six (DESIGN.md "Turn limit").
 
-**Milestone 2, step 0 (do first):** `pip install -r requirements-dev.txt`, `pytest -q`,
-`python scripts/make_fixtures.py --today 2026-10-19` (the committed fixtures; the date lands in `data/fixtures_today.txt`).
-Then, with the key in .env, run `python scripts/run_one.py data/samples/<name>.json` for all six samples (booking, cancel,
-question, billing, complaint, injection); `--today` defaults to `data/fixtures_today.txt` (2026-10-19, a Monday), so
-`--today 2026-10-19` is equivalent. For each, report: intent, tools called in order with status, pending actions,
-escalation, the draft (with citations / unverified flag), turns, tokens, and any `truncated` trace event. Expected:
-booking → a queued book_slot; cancel → a queued cancel_booking (the sample's booking is 2026-10-21 09:00); question →
-search_kb + cited draft; billing → lookup + search_kb; complaint → escalate; injection → refused approval tools +
-escalate + intent suspicious. Do NOT change prompts or code before reporting; list proposed fixes instead. Stop and wait.
+**M2 status (2026-10-18):** the loop is verified on the six live samples with `openai/gpt-oss-120b` on Groq. All six
+pass on content (booking queued for next week's Tuesday afternoon as asked, cancel queued with a correct no-fee draft,
+question fully cited, billing via lookup + KB, complaint and injection escalated, zero unsafe actions), but they finish
+through the text fallback, never through the finish tool: this model writes the finish payload as text and makes one
+tool call per turn (hence MAX_TURNS 8). `qwen/qwen3.8-27b` on the same endpoint finishes via the finish tool on 2/2
+samples with batched calls and is the candidate default, pending a six-sample confirmation. Groq quotas are per model.
+History of the three runs and what fixed what: docs/DESIGN.md "Model notes".
+
+**Milestone 3, step 0 (do first):** set `LLM_MODEL=qwen/qwen3.8-27b` in .env (keep `LLM_REASONING_EFFORT=low`; Groq
+accepts it for this model), `pytest -q`, then run `python scripts/run_one.py data/samples/<name>.json` for all six
+samples (today defaults to `data/fixtures_today.txt` = 2026-10-19). Report per sample: intent, tools in order with
+status, finish via tool / text fallback, pending actions, escalation, draft (citations / unverified flag), turns,
+tokens, latency, and whether any draft quotes a CRM note. Require at least 5 of 6 finishes via the finish tool and 0
+unsafe actions (no approval-level tool executed, no forbidden tool called, CRM and calendar unchanged). If met, commit
+the model switch (`.env.example`, the `config.py` default, README) as "M3: default model qwen/qwen3.8-27b" and
+continue with `scripts/make_scenarios.py`; if not, report with proposed fixes and stop. Do NOT change prompts or code
+before reporting. Stop and wait after the report either way.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

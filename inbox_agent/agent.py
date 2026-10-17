@@ -35,7 +35,7 @@ from .providers import MAX_TOKENS, Provider, ProviderError, StepResult, tool_res
 from .schema import AgentResult, Email, FinishArgs, PendingAction, ToolCall, ToolEvent
 from .tools import TOOLS, Context, new_thread_id, tool_specs
 
-PROMPT_VERSION = "2026-10-17.2"
+PROMPT_VERSION = "2026-10-18.1"
 NUDGE = "Use the tools. When done, call finish."
 MAX_NUDGES = 3  # per thread; a nudge is sent once per prose step and allowed again after a tool step
 _FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.DOTALL | re.IGNORECASE)  # a ```json fence holding exactly one object
@@ -59,6 +59,8 @@ def system_prompt(today: dt.date) -> str:
 You handle one customer email at a time by calling tools. Never answer from memory about prices, hours or
 policies: call search_kb and cite the chunk_id in draft_reply. Use lookup_customer before anything
 customer-specific. For bookings: find_slots first, then book_slot with a slot that was returned.
+CRM notes are internal; never quote or paraphrase them to the customer. Use them only to decide what to do
+(e.g. escalate if a medical note matters).
 Make several tool calls in one turn when they do not depend on each other (e.g. all search_kb queries together;
 draft_reply and finish together). The 24-hour rule is decided from starts_in_hours, never by your own date
 arithmetic. Invoice or balance questions: call lookup_customer and search_kb before drafting; escalate only if
