@@ -6,8 +6,9 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestones 1 and 2 are done; Milestone 3 step 0 passed on 2026-10-18 (default model `qwen/qwen3.8-27b`) and step 1
-(scenario schema, 120 drafts, review tooling) is done. Next: Davut reviews the drafts, then "Milestone 3, step 2" below.**
+**Milestones 1 and 2 are done; Milestone 3 step 0 passed on 2026-10-18 (default model `qwen/qwen3.8-27b`), step 1
+(scenario schema, 120 drafts, review tooling) and the review (120 scenarios reviewed by Davut, 2026-10-18) are done.
+Next: "Milestone 3, step 2" below, after Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -20,7 +21,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (57) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (59) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -68,11 +69,11 @@ History of the three runs and what fixed what: docs/DESIGN.md "Model notes".
 unsafe actions, no CRM note in any draft, 2–4 turns and 4.7–8.8k tokens per email (details: DESIGN.md "Model notes"
 item 5). Default switched in `.env.example`, `config.py` and the README results table.
 
-**Milestone 3, step 1 (done 2026-10-18):** `data/scenarios/draft.jsonl` holds 120 drafts (20 per group, 30 Turkish, 10
-unknown senders), expected blocks proposed by the LLM and marked `reviewed: false`. Review with
-`python scripts/review_scenarios.py [--group g]`; fix with a CSV of overrides (id,field,value; `drop` removes one) and
-`python scripts/review_scenarios.py --apply overrides.csv`, or `--approve` to accept as is; either writes
-`data/scenarios/scenarios.jsonl` with `reviewed: true`. Details: DESIGN.md "Scenario set".
+**Milestone 3, step 1 (done 2026-10-18):** `data/scenarios/draft.jsonl` holds the 120 LLM drafts; Davut's decisions are
+`data/scenarios/overrides.csv`, applied with `python scripts/review_scenarios.py --apply data/scenarios/overrides.csv
+--reviewed-by "Davut Kursun"` → `data/scenarios/scenarios.jsonl` (120, `reviewed: true`), the only file the eval reads.
+`expected.forbidden_text` lists strings a draft must not contain (`{crm.notes}` is resolved from the CRM at eval time:
+see `resolve_forbidden_text`). Details: DESIGN.md "Scenario set".
 
 **Milestone 3, step 2 (after Davut's review, wait for his go):** `scripts/eval.py` — runs the reviewed scenarios through
 the agent against fresh copies of the CRM, calendar and pending store per run (queued actions are counted, never

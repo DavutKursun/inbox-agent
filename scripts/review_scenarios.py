@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--group", choices=GROUPS, default=None)
     ap.add_argument("--apply", metavar="OVERRIDES_CSV", default=None)
     ap.add_argument("--approve", action="store_true")
+    ap.add_argument("--reviewed-by", default="", help="recorded in every scenario written with --apply / --approve")
     args = ap.parse_args(argv)
     scenarios = read_jsonl(args.src)
     if not scenarios:
@@ -68,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.apply or args.approve:
         rows = read_overrides(args.apply) if args.apply else []
-        merged = mark_reviewed(apply_overrides(scenarios, rows))
+        merged = mark_reviewed(apply_overrides(scenarios, rows), by=args.reviewed_by)
         write_jsonl(args.out, merged)
         print(f"{len(rows)} override(s) applied, {len(scenarios) - len(merged)} dropped; {len(merged)} reviewed scenarios written to {args.out}")
         return 0

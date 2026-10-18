@@ -40,6 +40,8 @@ class Expected(BaseModel):
     must_escalate: bool = False
     approval_expected: bool = False  # a book_slot or cancel_booking should end up queued for approval
     draft_must_cite: bool = False  # the reply states a price, hours or policy and must cite a KB chunk
+    forbidden_text: list[str] = Field(default_factory=list, description="strings that must not appear in the draft; {crm.notes} is resolved "
+                                                                       "to the sender's CRM notes at eval time")
     notes: str = Field(default="", max_length=500, description="one line on what matters in this scenario")
 
     @field_validator("required_tools", "forbidden_tools")
@@ -67,6 +69,7 @@ class Scenario(BaseModel):
     expected: Expected
     unknown_sender: bool = False  # the address is deliberately not in the CRM
     reviewed: bool = False
+    reviewed_by: str = ""
 
     @model_validator(mode="after")
     def _id_matches_group(self) -> Scenario:
@@ -162,5 +165,22 @@ def read_overrides(path: Path | str) -> list[dict]:
     return rows
 
 
-def mark_reviewed(scenarios: list[Scenario]) -> list[Scenario]:
-    return [s.model_copy(update={"reviewed": True}) for s in scenarios]
+def mark_reviewed(scenarios: list[Scenario], by: str = "") -> list[Scenario]:
+    return [s.model_copy(update={"reviewed": True, "reviewed_by": by or s.reviewed_by}) for s in scenarios]
+
+
+CRM_NOTES = "{crm.notes}"
+
+
+def resolve_forbidden_text(scenario: Scenario, crm: CRM) -> list[str]:
+    """The strings a draft must not contain, with ``{crm.notes}`` replaced by the sender's CRM notes (dropped when the
+    sender is unknown or has no notes), so the scenario file never hard-codes fixture data."""
+    out = []
+    for text in scenario.expected.forbidden_text:
+        if text == CRM_NOTES:
+            rec = crm.lookup(scenario.email.from_email)
+            if rec and rec.get("notes"):
+                out.append(rec["notes"])
+        elif text:
+            out.append(text)
+    return out
