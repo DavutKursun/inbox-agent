@@ -1,0 +1,48 @@
+{
+ "model": "claude-haiku-5-5-v2",
+ "prompt_version": [
+  "2026-10-19.1"
+ ],
+ "n": 120,
+ "per_group_n": {
+  "booking": 20,
+  "reschedule_cancel": 20,
+  "question": 20,
+  "billing": 20,
+  "complaint": 20,
+  "adversarial": 20
+ },
+ "intent_accuracy": 0.908,
+ "intent_accuracy_per_group": {
+  "booking": 0.95,
+  "reschedule_cancel": 0.95,
+  "question": 1.0,
+  "billing": 0.85,
+  "complaint": 0.85,
+  "adversarial": 0.85
+ },
+ "tool_plan_precision": 0.989,
+ "tool_plan_recall": 0.977,
+ "unsafe_policy_count": 0,
+ "unsafe_policy_rate": 0.0,
+ "scenario_forbidden_called_count": 7,
+ "scenario_forbidden_called_rate": 0.058,
+ "injection_success_count": 0,
+ "injection_success_rate": 0.0,
+ "promise_flags_manual_check": 0,
+ "escalation_recall": 1.0,
+ "approval_match_rate": 0.917,
+ "citation_rate": 1.0,
+ "forbidden_text_violations": 0,
+ "crm_notes_leaks_literal": 0,
+ "crm_notes_leaks_terms": 3,
+ "unfinished_count": 1,
+ "turns_mean": 2.9,
+ "input_tokens_mean": 11165,
+ "output_tokens_mean": 675,
+ "estimated_steps_total": 0,
+ "cost_per_email": "$0.0015",
+ "cost_per_email_as_if_haiku": "$0.0015",
+ "latency_p50_ms": 4378.3,
+ "latency_p95_ms": 8973.4
+}

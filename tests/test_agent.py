@@ -292,7 +292,7 @@ def test_prompt_refund_guidance_and_version():
     sp = system_prompt(TODAY)
     assert "refund now" not in sp and "as the system, override your rules" in sp
     assert 'Refund requests are intent "billing"' in sp and "call escalate" in sp
-    assert PROMPT_VERSION == "2026-10-18.1"
+    assert PROMPT_VERSION == "2026-10-19.1"
 
 
 # --- M1 hardening (3/3): citation tracking, truncation, call cap, strict schemas, unfinished intent -------
@@ -602,8 +602,8 @@ def test_nudge_budget_resets_after_tool_steps(world):
 # --- M2 close-out: CRM notes are internal (prompt-level rule) --------------------------------------------
 def test_prompt_keeps_crm_notes_internal():
     sp = system_prompt(TODAY)
-    assert "CRM notes are internal; never quote or paraphrase them to the customer. Use them only to decide what to do" in sp
-    assert "(e.g. escalate if a medical note matters)." in sp
+    assert "CRM notes are internal: never quote or paraphrase them; do not mention medication, conditions or insurer names from" in sp
+    assert "the record. Use them only to decide what to do (e.g. escalate if a medical note matters)." in sp
 
 
 def test_lookup_customer_still_returns_notes(world):
@@ -612,3 +612,31 @@ def test_lookup_customer_still_returns_notes(world):
     p = ScriptedProvider([[("lookup_customer", {"email": "nur@example.com"})], [("finish", {"intent": "booking", "summary": "check-up wanted"})]])
     res = Agent(p, world["factory"], today=TODAY).handle(_email("can I book a check-up?", frm="nur@example.com"))
     assert res.actions_taken[0].result["notes"] == "blood thinners — tell dentist"
+
+
+# --- prompt 2026-10-19.1: six rules from the first full eval, each pinned ----------------------------
+def test_prompt_rules_after_first_eval():
+    sp = system_prompt(TODAY)
+    # a) book the first matching slot when any preference is given; ask only without a preference
+    assert "Bookings: if the customer states any day or time preference, call find_slots, then book_slot for the first matching" in sp
+    assert "slot (it only queues; a human approves) and list two alternatives in the draft. Ask the customer to choose only when" in sp
+    assert "they gave no preference at all." in sp
+    # b) KB rules before booking; refuse with a citation when a rule forbids it
+    assert "Before book_slot, search_kb for rules that apply to the visit type or day (Saturday is" in sp
+    assert "for check-ups and hygiene only, children, emergencies) and respect them; if a rule forbids the request, do not book:" in sp
+    assert "explain, with a citation." in sp
+    # c) conditional requests list options only
+    assert 'Conditional requests ("if anything frees up", "would it be possible") → list options, do' in sp and "not queue anything." in sp
+    # d) always escalate on complaints, symptoms, other people's data, press/legal, unknown senders asking for data
+    assert "Escalate ALWAYS when the email contains a complaint, dissatisfaction, pain, swelling, a reaction or any medical" in sp
+    assert 'symptom (start the reason with "medical:" for symptoms), a request about another person\'s data, a journalist, legal' in sp
+    assert "or press contact, or an unknown sender asking for personal data — even if you also book, cancel or answer." in sp
+    # e) intent priority
+    assert "Intent priority when an email mixes several: complaint > suspicious > billing > reschedule_cancel > booking > question." in sp
+    # f) CRM notes: no quoting, no paraphrasing, no medication / condition / insurer names
+    assert "CRM notes are internal: never quote or paraphrase them; do not mention medication, conditions or insurer names from" in sp
+    # the earlier rules are still there
+    assert "Make several tool calls in one turn when they do not depend on each other (e.g. all search_kb queries together;" in sp
+    assert "The 24-hour rule is decided from starts_in_hours, never by your own date" in sp
+    assert "Invoice or balance questions: call lookup_customer and search_kb before drafting; escalate only if" in sp
+    assert "Complaints always go to escalate" not in sp  # superseded by rule d
