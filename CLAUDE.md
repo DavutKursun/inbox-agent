@@ -9,7 +9,8 @@ Section 0 says where we are and what changed from the original plan.
 **Milestones 1, 2 and 3 are done (M3 closed 2026-10-19: 120 reviewed scenarios, eval harness, three prompt versions on
 claude-haiku-5-5; v3: intent 0.892, unsafe (policy) 0, injection 0,
 escalation recall 1.000, unexpected escalations 18, $0.0015 per email).
-Next: "Milestone 4, step 0" below, after Davut's go.**
+Milestone 4 step 1 (FastAPI endpoints with the approval queue) is done; next: "Milestone 4, step 2" below, after
+Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -22,7 +23,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (65) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (71) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -30,7 +31,9 @@ Implemented:
   `data/scenarios/scenarios.jsonl`), `data/scenarios/draft.jsonl` (reviewed: false)
 - `inbox_agent/evaluation.py` (fresh fixtures per run, pacing, records, checks, metrics), `scripts/eval.py` (resumable
   runner; exit 3 on quota/budget), `scripts/eval_report.py` (table, README row, ten worst scenarios with trace links)
-- NOT yet: FastAPI routes, Gradio, Dockerfile, integrations, n8n.
+- `app.py` (FastAPI app factory: /handle, /pending, /approve, /reject, /trace, /health; shared singletons; 413/422/429/503/404),
+  `inbox_agent/fake_provider.py` (deterministic stand-in behind `INBOX_FAKE_PROVIDER=1`), `tests/test_app.py`
+- NOT yet: Gradio UI, Dockerfile + Space, integrations, n8n.
 
 Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
 - `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
@@ -90,15 +93,19 @@ over-escalation / over-booking trade-off, five failure examples with traces in d
 Open items carried into M4/M5: the qwen 120-scenario run on the free-tier quota (≈1M tokens, daily batches of ~24, the
 paced two-hour job), the gpt-oss comparison row, and the residual v3 misses listed in the Findings.
 
-**Milestone 4, step 0 (wait for Davut's go):** FastAPI + Gradio per §7. `app.py`: `POST /handle {from, subject, body}` →
-AgentResult (max 2,000 chars, budget guard, 4xx on validation/budget errors, provider errors reported as stopped_reason
-"error"); `GET /pending`; `POST /approve/{action_id}` and `POST /reject/{action_id}` calling `Agent.resolve` (never raises
-for a known id; 404 otherwise); `GET /trace/{thread_id}`. Gradio mounted on the same app: left the six sample emails plus
-"paste your own", middle the AgentResult and a thought-free trace viewer (tool / args / result per turn), right the
-approval queue with Approve / Reject buttons that call the same resolve path. Fake CRM/calendar/KB bundled, fresh copies
-per Space start, no real sending. Tests with the ScriptedProvider through FastAPI's TestClient (handle → pending → approve
-→ executed; reject; 404; oversize email; budget stop). Then Dockerfile + Hugging Face Space (Docker) + a 60-second GIF.
-Stop after the API + UI tests pass, before the Space.
+**Milestone 4, step 1 (done 2026-10-19):** `app.py` per §7: `POST /handle` → AgentResult (422 invalid email, 413 over
+MAX_EMAIL_CHARS, 429 budget exhausted, 503 no provider key), `GET /pending`, `POST /approve/{id}` and `POST /reject/{id}`
+→ the resolved PendingAction (404 unknown), `GET /trace/{thread_id}` → the trace as a list, `GET /health` → status, model,
+provider, pending_count, budget. Shared singletons, request logging without bodies, no CORS; `INBOX_FAKE_PROVIDER=1`
+runs it without a key. Tests through the TestClient cover the booking flow (handle → pending → approve → calendar
+changed), reject, the error codes, trace retrieval and health. Run: `uvicorn app:app --port 7860`.
+
+**Milestone 4, step 2 (wait for Davut's go):** the Gradio review UI mounted on the same app (`gr.mount_gradio_app`): left the
+six sample emails plus "paste your own", middle the AgentResult and a thought-free trace viewer (tool / args / result per
+turn), right the approval queue with Approve / Reject buttons that call the same resolve path as the API. No real
+sending; max 2,000 characters; the budget guard applies. Tests with the fake provider where Gradio allows (the callback
+functions, not the browser). Then step 3: Dockerfile + Hugging Face Space (Docker, fake fixtures bundled, fresh copies
+per start) + a 60-second GIF. Stop after each step.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

@@ -44,7 +44,20 @@ cp .env.example .env                 # free Groq/Cerebras key; no paid API neede
 python scripts/make_fixtures.py --today 2026-10-19   # seeded + dated; the committed fixtures use this date
 python scripts/run_one.py data/samples/booking.json
 pytest -q
+uvicorn app:app --port 7860           # the API; INBOX_FAKE_PROVIDER=1 runs it without a key
 ```
+
+## API
+```bash
+curl -s localhost:7860/health
+curl -s -X POST localhost:7860/handle -H 'content-type: application/json' \
+  -d '{"from": "torhan.akca0@example.com", "subject": "Check-up", "body": "Could I book a check-up next Tuesday afternoon?"}'
+curl -s localhost:7860/pending                     # queued book_slot / cancel_booking actions
+curl -s -X POST localhost:7860/approve/act_abc123   # runs the queued tool; or /reject/act_abc123
+curl -s localhost:7860/trace/thr_abc123             # the thread's trace as a JSON list
+```
+Errors: 422 invalid email, 413 body over 2,000 characters, 429 daily budget exhausted, 503 no provider key, 404 unknown action
+or thread. Interactive docs at `/docs`.
 
 ## Repository
 `inbox_agent/` — schema, policy, tools, agent loop, providers (Groq/Cerebras + Claude tool calling), crm (SQLite),

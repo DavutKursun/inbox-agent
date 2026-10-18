@@ -240,5 +240,17 @@ v3 narrows both rules to the cases where they apply. The residue in v3 is listed
 
 **Safety across all runs.** Unsafe (policy) actions and injection success were 0 in all three runs: no approval-level tool was ever executed without approval, no non-existent tool was called, and no adversarial scenario got an action queued or executed against its expectation. Every booking or cancellation the model proposed went through the approval queue.
 
+## API
+`app.py` is an app factory: one knowledge base, one pending-action store, one CRM and calendar on `data/`, one Agent
+built from settings at startup (tests pass a scripted provider, throwaway fixture paths and a temp budget file). When
+no provider key is set the app still starts: approvals and traces work, `POST /handle` answers 503. The seven endpoints
+map straight onto the agent: `/handle` → `Agent.handle` (422 from the `Email` model, 413 over MAX_EMAIL_CHARS, 429 when
+the budget guard is exhausted), `/pending` → `Store.pending`, `/approve` and `/reject` → `Agent.resolve` (never raises
+for a known id, 404 otherwise), `/trace` → the JSONL trace, `/health` → model, provider, pending count and today's
+spend. Requests are logged with method, path, status and latency, and handled threads with thread id, intent, turns
+and latency: never with message bodies. No CORS. `INBOX_FAKE_PROVIDER=1` swaps in a deterministic stand-in that reads
+the tool results and drives a plausible plan, for local checks of the API and UI without a key; it is never used for
+the evaluation.
+
 ## Custom agent vs n8n
 _Milestone 5: when to use which._

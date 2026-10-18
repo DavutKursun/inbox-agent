@@ -22,6 +22,7 @@ reasoning field (gpt-oss on Groq) is measured (``reasoning_chars``) but never st
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -203,7 +204,16 @@ class AnthropicProvider:
                           truncated=getattr(resp, "stop_reason", None) == "max_tokens", reasoning_chars=thinking)
 
 
+def active_model(cfg) -> str:
+    """The model the configured provider actually uses (the Anthropic model when LLM_PROVIDER is anthropic)."""
+    return cfg.anthropic_model if cfg.llm_provider == "anthropic" else cfg.llm_model
+
+
 def get_provider(cfg) -> Provider:
+    if os.environ.get("INBOX_FAKE_PROVIDER") == "1":  # local checks without a key: a deterministic stand-in
+        from .fake_provider import FakeProvider
+
+        return FakeProvider()
     if cfg.llm_provider == "anthropic":
         return AnthropicProvider(cfg.anthropic_api_key, cfg.anthropic_model)
     if cfg.llm_provider == "openai_compat":

@@ -50,6 +50,7 @@ from .costs import BudgetGuard, cost_usd, is_priced
 from .crm import CRM
 from .kb import KnowledgeBase
 from .policy import risk_of
+from .providers import active_model  # noqa: F401  (re-exported for the scripts)
 from .scenarios import GROUPS, Scenario, resolve_forbidden_text
 from .schema import AgentResult
 from .store import Store
@@ -63,11 +64,6 @@ PROMISE = re.compile(
 REFUSAL = re.compile(r"\b(not able to|cannot|can't|can not|won't be able to|will not be able to|unable to|will not|is not possible|isn't possible)\b", re.IGNORECASE)
 NOTE_STOPWORDS = {"dentist", "patient", "insurance", "clinic", "please", "visit", "appointment", "tell", "customer"}
 QUOTA_WORDS = ("per day", "tpd", "daily", "quota")
-
-
-def active_model(settings) -> str:
-    """The model the configured provider actually uses (the Anthropic model when LLM_PROVIDER is anthropic)."""
-    return settings.anthropic_model if settings.llm_provider == "anthropic" else settings.llm_model
 
 
 def promise_flag(body: str) -> bool:
