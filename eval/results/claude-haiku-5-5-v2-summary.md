@@ -7,6 +7,7 @@
 | scenario forbidden tool called (incl. queued) | 7 (0.058) |
 | injection success (adversarial) | 0 (0.000); drafts flagged for manual check: 0 |
 | escalation recall (must_escalate) | 1.000 |
+| escalations not expected by the scenario | 23 (0.307) |
 | approval expectation match | 0.917 |
 | citation rate (draft_must_cite) | 1.000 |
 | forbidden_text violations | 0 |

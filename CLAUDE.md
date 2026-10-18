@@ -4,11 +4,12 @@ This file is the build spec. Read it fully before writing code. Work milestone b
 milestone; after each milestone stop, show how to run it, and wait for Davut's OK.
 Section 0 says where we are and what changed from the original plan.
 
-## 0. Status (updated 2026-10-16)
+## 0. Status (updated 2026-10-19)
 
-**Milestones 1 and 2 are done; Milestone 3: step 0 (default model `qwen/qwen3.8-27b`), step 1 (120 drafts, review
-tooling), the review (120 scenarios reviewed by Davut) and step 3 (eval harness + report) are done, all 2026-10-18.
-Next: "Milestone 3, step 4" below (the paced 120-scenario run), after Davut's go.**
+**Milestones 1, 2 and 3 are done (M3 closed 2026-10-19: 120 reviewed scenarios, eval harness, three prompt versions on
+claude-haiku-5-5; v3: intent 0.892, unsafe (policy) 0, injection 0,
+escalation recall 1.000, unexpected escalations 18, $0.0015 per email).
+Next: "Milestone 4, step 0" below, after Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -21,7 +22,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (64) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (65) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -83,18 +84,21 @@ under 1,000 per minute, waits out per-minute 429s and exits 3 on a daily quota o
 `eval/results/<model>-summary.{json,md}`. `python scripts/eval_report.py` writes `<model>-report.md` (table, README row,
 ten worst scenarios with trace links). Metric definitions: DESIGN.md "Evaluation harness".
 
-**Milestone 3, step 4, first full run (done 2026-10-19, `claude-haiku-5-5` via `LLM_PROVIDER=anthropic`):** 120/120 finished
-via the finish tool, 1.22M tokens, $0.15, p50 4.5 s. Results kept as `eval/results/claude-haiku-5-5-v1.*` (records,
-summary, report) as the "before" for the README. Headline (current metric definitions): intent accuracy 0.892,
-unsafe_policy 0, scenario-forbidden calls 3 (all queued, none executed), injection success 0, escalation recall 0.778
-(complaints 15/20), citation rate 0.981, key-term CRM-note leaks in two booking drafts. Known model behaviours: Haiku
-offers slots instead of queuing a booking when the customer gave a range (5 of 20 bookings), and under-escalates
-complaints that also ask for something (pain + appointment, feedback + rebooking, allergic reaction).
+**Milestone 3 (done 2026-10-19).** Results: README table (v1/v2/v3 rows) and DESIGN.md "Findings" (rule effects, the
+over-escalation / over-booking trade-off, five failure examples with traces in docs/traces/, safety statement). Files:
+`eval/results/claude-haiku-5-5-v1.*`, `-v2.*`, `claude-haiku-5-5.*` (= v3, prompt 2026-10-19.2, the current prompt).
+Open items carried into M4/M5: the qwen 120-scenario run on the free-tier quota (≈1M tokens, daily batches of ~24, the
+paced two-hour job), the gpt-oss comparison row, and the residual v3 misses listed in the Findings.
 
-**Milestone 3, step 4, next (wait for Davut's go):** decide the prompt/agent fixes for the escalation and booking misses,
-rerun the 120 (same command, results land in `eval/results/claude-haiku-5-5.jsonl`), then fill the README results
-table (v1 vs rerun, hand-check line underneath) and the DESIGN.md "Findings" section (ten worst scenarios with traces).
-Groq models stay on the quota plan: ≈7.7k tokens per email, 200k per day per model, daily batches of ~24.
+**Milestone 4, step 0 (wait for Davut's go):** FastAPI + Gradio per §7. `app.py`: `POST /handle {from, subject, body}` →
+AgentResult (max 2,000 chars, budget guard, 4xx on validation/budget errors, provider errors reported as stopped_reason
+"error"); `GET /pending`; `POST /approve/{action_id}` and `POST /reject/{action_id}` calling `Agent.resolve` (never raises
+for a known id; 404 otherwise); `GET /trace/{thread_id}`. Gradio mounted on the same app: left the six sample emails plus
+"paste your own", middle the AgentResult and a thought-free trace viewer (tool / args / result per turn), right the
+approval queue with Approve / Reject buttons that call the same resolve path. Fake CRM/calendar/KB bundled, fresh copies
+per Space start, no real sending. Tests with the ScriptedProvider through FastAPI's TestClient (handle → pending → approve
+→ executed; reject; 404; oversize email; budget stop). Then Dockerfile + Hugging Face Space (Docker) + a 60-second GIF.
+Stop after the API + UI tests pass, before the Space.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

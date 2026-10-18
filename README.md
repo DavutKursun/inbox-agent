@@ -7,13 +7,21 @@ twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clie
 
 > **Live demo:** _Milestone 4_ · **n8n workflow:** `n8n/inbox-agent.json` (_Milestone 5_)
 
-## Results (120 scenarios) — filled in Milestone 3
+## Results (120 reviewed scenarios, claude-haiku-5-5 at list price, three prompt versions)
 
-| model | intent acc. | tool-plan P/R | unsafe actions | injection success | escalation recall | turns | cost / email | p50 latency |
-|---|---|---|---|---|---|---|---|---|
-| qwen/qwen3.8-27b (Groq, free, default) | – | – | **0** required | **0** required | – | – | free tier | – |
-| gpt-oss-120b (Groq, free) | – | – | **0** required | **0** required | – | – | free tier | – |
-| claude-haiku-5-5 (list price, "as if") | – | – | – | – | – | – | – | – |
+| run | intent acc. | tool-plan P/R | unsafe (policy) | scenario-forbidden calls | injection success | escalation recall | unexpected escalations | approval match | citation rate | note leaks (literal/key-term) | turns | cost / email | p50 latency |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| v1: prompt 2026-10-18.1 | 0.892 | 0.994 / 0.944 | **0** | 3 | **0** | 0.778 | 5 | 0.917 | 0.981 | 0 / 3 | 2.8 | $0.0013 | 4.5 s |
+| v2: prompt 2026-10-19.1 | 0.908 | 0.989 / 0.977 | **0** | 7 | **0** | 1.000 | 23 | 0.917 | 1.000 | 0 / 3 | 2.9 | $0.0015 | 4.4 s |
+| v3: prompt 2026-10-19.2 | 0.892 | 0.992 / 0.956 | **0** | 5 | **0** | 1.000 | 18 | 0.900 | 1.000 | 0 / 1 | 2.88 | $0.0015 | 4.0 s |
+
+Hand-checked: the ten worst scenarios of every run were read in full (traces under `eval/results/traces/`, five examples in
+[docs/traces/](docs/traces/)); unsafe (policy) and injection success were 0 in every run. Definitions in [docs/DESIGN.md](docs/DESIGN.md).
+
+qwen/qwen3.8-27b (Groq, free tier, the configured default): 6 of 6 sample emails finished via the finish tool with 0 unsafe actions,
+3.0 turns and 4.7–8.8k tokens per email, p50 latency 46 s under the free-tier queue; its 120-scenario run is pending on the
+free-tier quota (≈1M tokens at 200k per day per model). gpt-oss-120b finishes only through the text fallback and is kept as a
+comparison model.
 
 ## How it works
 1. **Tools with schemas** (`inbox_agent/tools.py`): lookup_customer · search_kb · find_slots · book_slot ·

@@ -31,6 +31,8 @@
  "injection_success_rate": 0.0,
  "promise_flags_manual_check": 0,
  "escalation_recall": 0.778,
+ "unexpected_escalation_count": 5,
+ "unexpected_escalation_rate": 0.067,
  "approval_match_rate": 0.917,
  "citation_rate": 0.981,
  "forbidden_text_violations": 0,

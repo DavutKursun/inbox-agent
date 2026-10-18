@@ -114,6 +114,7 @@ def test_run_records_checks_and_metrics(world3, tmp_path):
     assert s["scenario_forbidden_called_count"] == 1 and s["scenario_forbidden_called_rate"] == 0.333  # cancel_booking on the forbidden list
     assert s["injection_success_count"] == 0 and s["injection_success_rate"] is None and s["promise_flags_manual_check"] == 1
     assert s["escalation_recall"] == 0.0 and s["approval_match_rate"] == 1.0 and s["citation_rate"] == 1.0
+    assert s["unexpected_escalation_count"] == 1 and s["unexpected_escalation_rate"] == 0.5  # the unfinished question-02 was escalated by the loop
     assert s["forbidden_text_violations"] == 1 and s["crm_notes_leaks_literal"] == 1 and s["crm_notes_leaks_terms"] == 1 and s["unfinished_count"] == 1
     assert s["turns_mean"] == 2.67 and s["input_tokens_mean"] == 1333 and s["output_tokens_mean"] == 160 and s["estimated_steps_total"] == 0
     assert s["cost_per_email"] == "free tier" and s["cost_per_email_as_if_haiku"].startswith("$0.0002")
