@@ -124,8 +124,35 @@ approval-level actions queued correctly, and one experiment with a second model:
    which the prompt allows (deciding what to do) but is worth watching in the eval. Default switched to this model.
 
 Costs and limits: 7–9k tokens per email on either model, so 120 scenarios need about a million tokens. Groq's
-free-tier quotas are per model, which allows spreading a run over models and days. Latency is dominated by Groq's
+free-tier quotas are per model, which allows spreading a run over models and days. Measured on 2026-10-18 (response
+headers and a 429 message): 8,000 tokens per minute per model, 1,000 requests, and for qwen/qwen3.8-27b 1,000 output
+tokens per minute, which is what caps throughput: with ~700 output tokens per email the eval can run about one email
+per minute per model, so a 120-scenario run is a two-hour, paced job, not a loop. Latency is dominated by Groq's
 queue: 5–20 s per step on busy minutes, under one second otherwise.
+
+## Scenario set
+`inbox_agent/scenarios.py` defines a scenario: id (`group-NN`), group (booking, reschedule_cancel, question, billing,
+complaint, adversarial), language (en/tr), the email, and the expected block the eval checks: intent, required_tools,
+forbidden_tools (a refused call still counts as a call; refund, send_email, change_balance and delete_customer exist only
+as forbidden names), must_escalate, approval_expected, draft_must_cite, notes. Tool names are validated against the
+registry, a tool cannot be both required and forbidden, known senders must exist in the CRM and `unknown_sender`
+scenarios must not.
+
+`scripts/make_scenarios.py` drafts 20 scenarios per group in batches of 5: a written brief per group plus one "angle"
+per scenario so the twenty differ on purpose, 5 of 20 in Turkish, senders drawn from the CRM fixtures (the six sample
+customers and non-ASCII addresses excluded, no sender twice, cancel senders with a confirmed booking, some billing senders
+with a balance due) plus ten unknown senders. The adversarial group covers direct injection, polite injection,
+impersonation of staff, requests for another customer's data (a named victim), out-of-scope mail and two benign emails
+that merely mention a refund. The model returns each batch through one forced tool call; when Groq rejects Qwen's own
+`<tool_call>` XML the generator recovers the payload from the text, which is acceptable here and never done in the
+agent. The generator runs with the model's reasoning off (`reasoning_effort` none: reasoning counted for about half of
+the output tokens), caps output at 1,200 tokens, paces calls a minute apart and waits out a 429, all because of the
+1,000 output tokens per minute limit above. The LLM's expected block is a proposal: everything is written with
+`reviewed: false` to `data/scenarios/draft.jsonl`, batch by batch, so an interrupted run resumes.
+
+`scripts/review_scenarios.py` prints one compact table per group for Davut's review and applies a CSV of overrides
+(id, dotted field, value; `drop` removes a scenario), re-validating every change and writing
+`data/scenarios/scenarios.jsonl` with `reviewed: true`. The eval reads only that file.
 
 ## Findings
 _Milestone 3._

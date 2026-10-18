@@ -41,7 +41,7 @@ pytest -q
 ## Repository
 `inbox_agent/` — schema, policy, tools, agent loop, providers (Groq/Cerebras + Claude tool calling), crm (SQLite),
 calendar (fake + interface), kb (BM25 over markdown; a small cousin of [docs-chat](https://github.com/DavutKursun/docs-chat)),
-store, costs · `scripts/` — make_fixtures, run_one (+ make_scenarios, eval from M3) · `integrations/` — Google Calendar,
+store, costs · `scripts/` — make_fixtures, run_one, make_scenarios, review_scenarios (+ eval from M3 step 2) · `integrations/` — Google Calendar,
 Gmail (M5) · `n8n/` — workflow JSON (M5) · `data/` — kb pages, samples, scenarios · `docs/DESIGN.md` · `tests/`
 
 ## License

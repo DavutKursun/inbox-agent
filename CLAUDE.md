@@ -6,8 +6,8 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestones 1 and 2 are done (48 tests, no network); Milestone 3 step 0 passed on 2026-10-18 and the default model
-is `qwen/qwen3.8-27b`. Next: "Milestone 3, step 1" below, after Davut's go.**
+**Milestones 1 and 2 are done; Milestone 3 step 0 passed on 2026-10-18 (default model `qwen/qwen3.8-27b`) and step 1
+(scenario schema, 120 drafts, review tooling) is done. Next: Davut reviews the drafts, then "Milestone 3, step 2" below.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -20,10 +20,13 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (48) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (57) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
-- NOT yet: `scripts/make_scenarios.py`, `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
+- `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
+  (120 drafts via briefs + angles, batches of 5, resumable), `scripts/review_scenarios.py` (review tables, overrides CSV →
+  `data/scenarios/scenarios.jsonl`), `data/scenarios/draft.jsonl` (reviewed: false)
+- NOT yet: `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
 
 Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
 - `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
@@ -65,11 +68,20 @@ History of the three runs and what fixed what: docs/DESIGN.md "Model notes".
 unsafe actions, no CRM note in any draft, 2–4 turns and 4.7–8.8k tokens per email (details: DESIGN.md "Model notes"
 item 5). Default switched in `.env.example`, `config.py` and the README results table.
 
-**Milestone 3, step 1 (wait for Davut's go):** `scripts/make_scenarios.py` — 120 scenarios in 6 groups of 20 (§6),
-drafted with the LLM, written to `data/scenarios/*.jsonl` with expected `{intent, required_tools, forbidden_tools,
-must_escalate, approval_expected}`; every expected outcome is checked by Davut before `scripts/eval.py` runs. Quota
-plan first: ~8k tokens per email means ~1M tokens for 120 scenarios, i.e. daily batches of ~20 per model on the free
-tier; propose the batch plan before generating.
+**Milestone 3, step 1 (done 2026-10-18):** `data/scenarios/draft.jsonl` holds 120 drafts (20 per group, 30 Turkish, 10
+unknown senders), expected blocks proposed by the LLM and marked `reviewed: false`. Review with
+`python scripts/review_scenarios.py [--group g]`; fix with a CSV of overrides (id,field,value; `drop` removes one) and
+`python scripts/review_scenarios.py --apply overrides.csv`, or `--approve` to accept as is; either writes
+`data/scenarios/scenarios.jsonl` with `reviewed: true`. Details: DESIGN.md "Scenario set".
+
+**Milestone 3, step 2 (after Davut's review, wait for his go):** `scripts/eval.py` — runs the reviewed scenarios through
+the agent against fresh copies of the CRM, calendar and pending store per run (queued actions are counted, never
+executed), computes the §6 metrics (intent accuracy, tool-plan precision/recall, unsafe-action rate, injection success,
+escalation recall on complaints, citation rate, turns, tokens, cost incl. the Haiku "as if" price, latency p50/p95)
+and writes `eval/results/<model>-<date>.json` plus a markdown table; `--group` and `--limit` for batches, and pacing:
+Groq's free tier allows 1,000 output tokens per minute per model (8,000 tokens per minute in all), so the eval must
+run about one email per minute per model (a 120-scenario run is a paced two-hour job; Groq quotas are per model).
+First run: one group with the default model, report, stop and wait.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

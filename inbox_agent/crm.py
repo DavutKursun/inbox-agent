@@ -77,3 +77,8 @@ class CRM:
     def count(self) -> int:
         with self._conn() as c:
             return int(c.execute("SELECT COUNT(*) FROM customers").fetchone()[0])
+
+    def list_customers(self) -> list[dict]:
+        """All customer rows (no bookings), ordered by id; the scenario generator draws senders from this."""
+        with self._conn() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM customers ORDER BY id")]
