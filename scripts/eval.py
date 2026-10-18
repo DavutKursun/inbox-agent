@@ -19,15 +19,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from inbox_agent.config import RESULTS, fixtures_today, settings
+from inbox_agent.config import CRM_DB, RESULTS, fixtures_today, settings
 from inbox_agent.costs import BudgetGuard
-from inbox_agent.evaluation import Pacer, markdown_table, read_records, results_path, run, select, summarize, summary_path
+from inbox_agent.crm import CRM
+from inbox_agent.evaluation import Pacer, markdown_table, read_records, rescore, results_path, run, select, summarize, summary_path
 from inbox_agent.providers import ProviderError, get_provider
 from inbox_agent.scenarios import GROUPS, REVIEWED_PATH, read_jsonl
 
 
 def write_summary(scenarios, model: str, results_dir: Path) -> dict:
-    summary = summarize(scenarios, read_records(results_path(model, results_dir)), model)
+    records = read_records(results_path(model, results_dir))
+    records = rescore(scenarios, records, CRM(CRM_DB) if CRM_DB.exists() else None)  # current check definitions
+    summary = summarize(scenarios, records, model)
     results_dir.mkdir(parents=True, exist_ok=True)
     summary_path(model, results_dir).write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     summary_path(model, results_dir, "md").write_text(markdown_table(summary) + "\n", encoding="utf-8")
