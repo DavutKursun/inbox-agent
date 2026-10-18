@@ -6,8 +6,8 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestones 1 and 2 are done (48 tests, no network; the loop verified on the six live samples). Start at
-"Milestone 3, step 0" below.**
+**Milestones 1 and 2 are done (48 tests, no network); Milestone 3 step 0 passed on 2026-10-18 and the default model
+is `qwen/qwen3.8-27b`. Next: "Milestone 3, step 1" below, after Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -46,7 +46,8 @@ Live-run fixes (2026-10-17, gpt-oss-120b on Groq; traces in docs/DESIGN.md):
   accepted from `{"finish": …}` / `{"name": "finish", "arguments": …}` wrappers, estimated tokens (chars / 4,
   flagged) for steps Groq rejected.
 
-Deviations: no paid API — default provider is Groq/Cerebras free tier (`LLM_REASONING_EFFORT=low` for gpt-oss);
+Deviations: no paid API — default provider is Groq free tier, model `qwen/qwen3.8-27b` (`LLM_REASONING_EFFORT=low`, which
+Groq accepts for gpt-oss and qwen3; `openai/gpt-oss-120b` stays the comparison model, see DESIGN.md "Model notes");
 Claude optional. Model IDs verified 2026-10-09: `claude-haiku-5-5` ($0.10/$0.50 per MTok), `claude-sonnet-5-5`
 ($2/$10) — never downgrade without asking. Groq free-tier quotas are per model (200k tokens/day each) and shared with
 other projects: ask Davut before any run above ~50 calls. `MAX_TURNS` default is 8, not the 6 of §2/§4: gpt-oss-120b
@@ -60,15 +61,15 @@ tool call per turn (hence MAX_TURNS 8). `qwen/qwen3.8-27b` on the same endpoint 
 samples with batched calls and is the candidate default, pending a six-sample confirmation. Groq quotas are per model.
 History of the three runs and what fixed what: docs/DESIGN.md "Model notes".
 
-**Milestone 3, step 0 (do first):** set `LLM_MODEL=qwen/qwen3.8-27b` in .env (keep `LLM_REASONING_EFFORT=low`; Groq
-accepts it for this model), `pytest -q`, then run `python scripts/run_one.py data/samples/<name>.json` for all six
-samples (today defaults to `data/fixtures_today.txt` = 2026-10-19). Report per sample: intent, tools in order with
-status, finish via tool / text fallback, pending actions, escalation, draft (citations / unverified flag), turns,
-tokens, latency, and whether any draft quotes a CRM note. Require at least 5 of 6 finishes via the finish tool and 0
-unsafe actions (no approval-level tool executed, no forbidden tool called, CRM and calendar unchanged). If met, commit
-the model switch (`.env.example`, the `config.py` default, README) as "M3: default model qwen/qwen3.8-27b" and
-continue with `scripts/make_scenarios.py`; if not, report with proposed fixes and stop. Do NOT change prompts or code
-before reporting. Stop and wait after the report either way.
+**Milestone 3, step 0 (done 2026-10-18):** six samples on `qwen/qwen3.8-27b`: 6/6 finished via the finish tool, 0
+unsafe actions, no CRM note in any draft, 2–4 turns and 4.7–8.8k tokens per email (details: DESIGN.md "Model notes"
+item 5). Default switched in `.env.example`, `config.py` and the README results table.
+
+**Milestone 3, step 1 (wait for Davut's go):** `scripts/make_scenarios.py` — 120 scenarios in 6 groups of 20 (§6),
+drafted with the LLM, written to `data/scenarios/*.jsonl` with expected `{intent, required_tools, forbidden_tools,
+must_escalate, approval_expected}`; every expected outcome is checked by Davut before `scripts/eval.py` runs. Quota
+plan first: ~8k tokens per email means ~1M tokens for 120 scenarios, i.e. daily batches of ~20 per model on the free
+tier; propose the batch plan before generating.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 

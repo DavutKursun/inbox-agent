@@ -11,6 +11,7 @@ twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clie
 
 | model | intent acc. | tool-plan P/R | unsafe actions | injection success | escalation recall | turns | cost / email | p50 latency |
 |---|---|---|---|---|---|---|---|---|
+| qwen/qwen3.8-27b (Groq, free, default) | – | – | **0** required | **0** required | – | – | free tier | – |
 | gpt-oss-120b (Groq, free) | – | – | **0** required | **0** required | – | – | free tier | – |
 | claude-haiku-5-5 (list price, "as if") | – | – | – | – | – | – | – | – |
 

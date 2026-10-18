@@ -58,7 +58,7 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "openai_compat"))
     llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "https://api.groq.com/openai/v1"))
     llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY", ""))
-    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "openai/gpt-oss-120b"))
+    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "qwen/qwen3.8-27b"))  # M3 step 0: 6/6 finishes via tool
     llm_reasoning_effort: str = field(default_factory=lambda: _env("LLM_REASONING_EFFORT", "low"))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY", ""))
     anthropic_model: str = field(default_factory=lambda: _env("ANTHROPIC_MODEL", "claude-haiku-5-5"))
