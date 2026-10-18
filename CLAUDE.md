@@ -6,9 +6,9 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-16)
 
-**Milestones 1 and 2 are done; Milestone 3 step 0 passed on 2026-10-18 (default model `qwen/qwen3.8-27b`), step 1
-(scenario schema, 120 drafts, review tooling) and the review (120 scenarios reviewed by Davut, 2026-10-18) are done.
-Next: "Milestone 3, step 2" below, after Davut's go.**
+**Milestones 1 and 2 are done; Milestone 3: step 0 (default model `qwen/qwen3.8-27b`), step 1 (120 drafts, review
+tooling), the review (120 scenarios reviewed by Davut) and step 3 (eval harness + report) are done, all 2026-10-18.
+Next: "Milestone 3, step 4" below (the paced 120-scenario run), after Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -21,13 +21,15 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (59) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (62) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
   (120 drafts via briefs + angles, batches of 5, resumable), `scripts/review_scenarios.py` (review tables, overrides CSV →
   `data/scenarios/scenarios.jsonl`), `data/scenarios/draft.jsonl` (reviewed: false)
-- NOT yet: `scripts/eval.py`, FastAPI routes, Gradio, Dockerfile, integrations, n8n.
+- `inbox_agent/evaluation.py` (fresh fixtures per run, pacing, records, checks, metrics), `scripts/eval.py` (resumable
+  runner; exit 3 on quota/budget), `scripts/eval_report.py` (table, README row, ten worst scenarios with trace links)
+- NOT yet: FastAPI routes, Gradio, Dockerfile, integrations, n8n.
 
 Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
 - `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
@@ -75,14 +77,17 @@ item 5). Default switched in `.env.example`, `config.py` and the README results 
 `expected.forbidden_text` lists strings a draft must not contain (`{crm.notes}` is resolved from the CRM at eval time:
 see `resolve_forbidden_text`). Details: DESIGN.md "Scenario set".
 
-**Milestone 3, step 2 (after Davut's review, wait for his go):** `scripts/eval.py` — runs the reviewed scenarios through
-the agent against fresh copies of the CRM, calendar and pending store per run (queued actions are counted, never
-executed), computes the §6 metrics (intent accuracy, tool-plan precision/recall, unsafe-action rate, injection success,
-escalation recall on complaints, citation rate, turns, tokens, cost incl. the Haiku "as if" price, latency p50/p95)
-and writes `eval/results/<model>-<date>.json` plus a markdown table; `--group` and `--limit` for batches, and pacing:
-Groq's free tier allows 1,000 output tokens per minute per model (8,000 tokens per minute in all), so the eval must
-run about one email per minute per model (a 120-scenario run is a paced two-hour job; Groq quotas are per model).
-First run: one group with the default model, report, stop and wait.
+**Milestone 3, step 3 (done 2026-10-18):** the harness. `python scripts/eval.py [--group g] [--limit N] [--ids a,b]
+[--delay S]` appends one record per scenario to `eval/results/<model>.jsonl` (resumable by id), paces output tokens
+under 1,000 per minute, waits out per-minute 429s and exits 3 on a daily quota or the budget guard; it then rewrites
+`eval/results/<model>-summary.{json,md}`. `python scripts/eval_report.py` writes `<model>-report.md` (table, README row,
+ten worst scenarios with trace links). Metric definitions: DESIGN.md "Evaluation harness".
+
+**Milestone 3, step 4 (wait for Davut's go):** run the 120 scenarios with the default model in daily batches that fit the
+200k-tokens-per-day quota for qwen (≈7.7k tokens per email measured on the six samples → ≈925k tokens in all → 5 days of
+24 scenarios, e.g. `python scripts/eval.py --limit 24 --delay 5`, resumable), check the worst scenarios by hand after each
+batch, then fill the README results table (hand-check line underneath) and the DESIGN.md "Findings" section (ten worst
+scenarios with traces). Second model (gpt-oss-120b) only if quota allows.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 
