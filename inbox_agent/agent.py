@@ -30,12 +30,12 @@ from pydantic import ValidationError
 from .calendar import weekday_name
 from .config import COMPANY, settings
 from .costs import BudgetGuard, cost_usd
-from .policy import looks_suspicious, policy_summary, risk_of
+from .policy import call_limit, looks_suspicious, policy_summary, risk_of
 from .providers import MAX_TOKENS, Provider, ProviderError, StepResult, tool_result_message
 from .schema import AgentResult, Email, FinishArgs, PendingAction, ToolCall, ToolEvent
 from .tools import TOOLS, Context, new_thread_id, tool_specs
 
-PROMPT_VERSION = "2026-10-19.2"
+PROMPT_VERSION = "2026-10-19.1"  # v2: the deployed version by the fixed rule (DESIGN.md "Findings")
 NUDGE = "Use the tools. When done, call finish."
 MAX_NUDGES = 3  # per thread; a nudge is sent once per prose step and allowed again after a tool step
 _FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.DOTALL | re.IGNORECASE)  # a ```json fence holding exactly one object
@@ -59,24 +59,19 @@ def system_prompt(today: dt.date) -> str:
 You handle one customer email at a time by calling tools. Never answer from memory about prices, hours or
 policies: call search_kb and cite the chunk_id in draft_reply. Use lookup_customer before anything
 customer-specific.
-Bookings: apply the booking rule only when the stated preference CAN be met: inside opening hours, for the sender
-themselves, not conditional ("if anything frees up", "would it be possible"), no named dentist, known sender. Then
-call find_slots, then book_slot for the first matching slot (it only queues; a human approves) and list two
-alternatives in the draft. Otherwise, or when no preference was given, list options in the draft and do not call
-book_slot. For a spouse or another person: book only the sender and explain that the other person must write
-separately. Before book_slot, search_kb for rules that apply to the visit type or day (Saturday is
+Bookings: if the customer states any day or time preference, call find_slots, then book_slot for the first matching
+slot (it only queues; a human approves) and list two alternatives in the draft. Ask the customer to choose only when
+they gave no preference at all. Before book_slot, search_kb for rules that apply to the visit type or day (Saturday is
 for check-ups and hygiene only, children, emergencies) and respect them; if a rule forbids the request, do not book:
-explain, with a citation.
-Escalate ALWAYS when the email contains a complaint or dissatisfaction, a request about another person's data, a
-journalist, legal or press contact, or an unknown sender asking for personal data — even if you also book, cancel or
-answer. Start the reason with "medical:" only for symptoms the sender reports now (pain, swelling, a reaction, fever at
-the clinic's door) — never from CRM notes, and never for a routine illness given as a reason to cancel (flu → just
-cancel). Do not escalate on a plain booking, reschedule or question path unless one of these triggers is present.
-Escalated threads still get a short polite draft.
+explain, with a citation. Conditional requests ("if anything frees up", "would it be possible") → list options, do
+not queue anything.
+Escalate ALWAYS when the email contains a complaint, dissatisfaction, pain, swelling, a reaction or any medical
+symptom (start the reason with "medical:" for symptoms), a request about another person's data, a journalist, legal
+or press contact, or an unknown sender asking for personal data — even if you also book, cancel or answer. Escalated
+threads still get a short polite draft.
 Intent priority when an email mixes several: complaint > suspicious > billing > reschedule_cancel > booking > question.
-CRM notes are internal: never quote or paraphrase them; do not mention medication, conditions, preferences or insurer
-names from the record ("mornings", "AXA") unless the customer wrote them in this email. Use them only to decide what
-to do.
+CRM notes are internal: never quote or paraphrase them; do not mention medication, conditions or insurer names from
+the record. Use them only to decide what to do (e.g. escalate if a medical note matters).
 Make several tool calls in one turn when they do not depend on each other (e.g. all search_kb queries together;
 draft_reply and finish together). The 24-hour rule is decided from starts_in_hours, never by your own date
 arithmetic. Invoice or balance questions: call lookup_customer and search_kb before drafting; escalate only if
@@ -227,6 +222,13 @@ class Agent:
             args = tool.args_model.model_validate(call.args)
         except ValidationError as exc:
             return ToolEvent(turn=turn, call=call, status="error", result=f"invalid arguments: {str(exc)[:300]}")
+        limit = call_limit(call.name)
+        if limit is not None:  # loop guard (policy.CALL_LIMITS): over the limit, the call is answered, not run
+            used = ctx.calls.get(call.name, 0)
+            if used >= limit:
+                return ToolEvent(turn=turn, call=call, status="error",
+                                 result=f"{call.name} limit reached ({limit} calls per email): answer from the results you already have, or escalate")
+            ctx.calls[call.name] = used + 1
         if risk == "approval":
             if suspicious:
                 return ToolEvent(turn=turn, call=call, status="refused", result="email flagged as suspicious; action requires a human")

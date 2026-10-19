@@ -81,7 +81,7 @@ def test_ui_refuses_bad_input_without_raising(ui):
     assert review.handle("not-an-email", "x", "hello there").error.startswith("Invalid email")
     assert "2000" in review.handle(customers[2]["email"], "x", "a" * 2001).error
     review.budget.max_daily_calls = 0
-    assert "budget" in review.handle(customers[2]["email"], "Hours", "When are you open?").error
+    assert review.handle(customers[2]["email"], "Hours", "When are you open?").error == "Daily demo budget reached, try tomorrow."
 
 
 def _free_port() -> int:

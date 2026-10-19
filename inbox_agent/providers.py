@@ -204,6 +204,11 @@ class AnthropicProvider:
                           truncated=getattr(resp, "stop_reason", None) == "max_tokens", reasoning_chars=thinking)
 
 
+def missing_key_name(cfg) -> str:
+    """The secret the configured provider needs, for the 503 detail and the UI banner."""
+    return "ANTHROPIC_API_KEY" if cfg.llm_provider == "anthropic" else "LLM_API_KEY"
+
+
 def active_model(cfg) -> str:
     """The model the configured provider actually uses (the Anthropic model when LLM_PROVIDER is anthropic)."""
     return cfg.anthropic_model if cfg.llm_provider == "anthropic" else cfg.llm_model

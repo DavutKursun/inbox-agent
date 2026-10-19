@@ -87,7 +87,7 @@ def test_error_codes(api):
     assert client.get("/trace/thr_nope").status_code == 404 and client.get("/trace/../x").status_code in (404, 422)
     budget.max_daily_calls = 0
     r = client.post("/handle", json={"from": sender, "subject": "Hours", "body": "When are you open on Saturday?"})
-    assert r.status_code == 429 and "budget" in r.json()["detail"]
+    assert r.status_code == 429 and r.json()["detail"] == "Daily demo budget reached, try tomorrow."
 
 
 def test_health_and_no_provider(api, tmp_path, monkeypatch):

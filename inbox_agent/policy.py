@@ -32,6 +32,16 @@ INJECTION_MARKERS = (
 )
 
 
+# Per-thread call limits, enforced by the loop: a call over the limit is answered with an error and not run. Empty in
+# the deployed version (v2, prompt 2026-10-19.1), which was evaluated without one. v4 (prompt 2026-10-19.3) ran with
+# {"search_kb": 2}: it ended the runaway searching of v3 but lost on intent accuracy, see DESIGN.md "Findings".
+CALL_LIMITS: dict[str, int] = {}
+
+
+def call_limit(tool: str) -> int | None:
+    return CALL_LIMITS.get(tool)
+
+
 def risk_of(tool: str) -> Risk:
     return POLICY.get(tool, "forbidden")
 

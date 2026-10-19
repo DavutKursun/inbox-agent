@@ -90,3 +90,18 @@ def test_dockerfile_dockerignore_and_space_readme():
         assert subprocess.run(["hadolint", "Dockerfile"], cwd=ROOT, capture_output=True, text=True, check=False).returncode == 0
     else:
         pytest.skip("hadolint not installed: the CI docker job lints the Dockerfile")
+
+
+def test_banner_and_503_name_the_key_of_the_configured_provider(tmp_path, monkeypatch):
+    monkeypatch.delenv("INBOX_FAKE_PROVIDER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
+    app = create_app(settings=Settings(), crm_path=tmp_path / "crm.sqlite", calendar_path=tmp_path / "calendar.json", store_root=tmp_path / "runtime",
+                     budget=BudgetGuard(tmp_path / "b.json", 0.20, 450), today=TODAY, samples_dir=tmp_path / "samples")
+    banner = app.state.ui.banner()
+    assert "ANTHROPIC_API_KEY" in banner and "LLM_API_KEY" not in banner
+    r = TestClient(app).post("/handle", json={"from": "a@example.com", "subject": "s", "body": "hello there"})
+    assert r.status_code == 503 and "ANTHROPIC_API_KEY" in r.json()["detail"]
+    assert "ANTHROPIC_API_KEY" in app.state.ui.handle("a@example.com", "s", "hello there").error
+    assert "daily cap 450 calls / $0.2" in app.state.ui.header()

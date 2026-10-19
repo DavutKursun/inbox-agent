@@ -35,6 +35,7 @@ class Context:
     customer_email: str
     today: date = field(default_factory=date.today)  # the agent's "now" for validity checks; Agent.handle sets it
     retrieved: set[str] = field(default_factory=set)  # chunk_ids search_kb returned in this thread: the only citable ones
+    calls: dict[str, int] = field(default_factory=dict)  # calls per tool in this thread, for policy.CALL_LIMITS
     draft: Draft | None = None
     escalation: str = ""
     finish: FinishArgs | None = None

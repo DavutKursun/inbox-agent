@@ -26,13 +26,14 @@ from inbox_agent.config import settings as default_settings
 from inbox_agent.costs import BudgetGuard
 from inbox_agent.crm import CRM
 from inbox_agent.kb import KnowledgeBase
-from inbox_agent.providers import ProviderError, get_provider
+from inbox_agent.providers import ProviderError, get_provider, missing_key_name
 from inbox_agent.schema import AgentResult, Email, PendingAction
 from inbox_agent.store import Store
 from inbox_agent.tools import Context
 
 log = logging.getLogger("inbox_agent.app")
 THREAD_ID = r"^[A-Za-z0-9_-]{1,64}$"
+BUDGET_MESSAGE = "Daily demo budget reached, try tomorrow."
 ACTION_ID = r"^[A-Za-z0-9_-]{1,64}$"
 
 
@@ -77,15 +78,15 @@ def create_app(*, settings: Settings = default_settings, provider=None, crm_path
                                                                  503: {"description": "no LLM provider configured"}})
     def handle(email: Email) -> AgentResult:
         if provider is None:
-            raise HTTPException(503, "no LLM provider configured: set LLM_API_KEY or ANTHROPIC_API_KEY (or INBOX_FAKE_PROVIDER=1 for a local check)")
+            raise HTTPException(503, f"no LLM provider configured: add the {missing_key_name(settings)} secret (or INBOX_FAKE_PROVIDER=1 for a local check)")
         if len(email.body) > settings.max_email_chars:
             raise HTTPException(413, f"email body longer than {settings.max_email_chars} characters")
         if not budget.can_spend():
-            raise HTTPException(429, "daily budget exhausted; try again tomorrow")
+            raise HTTPException(429, BUDGET_MESSAGE)
         try:
             res = agent.handle(email)
         except RuntimeError as exc:  # the budget guard, raised inside the loop
-            raise HTTPException(429, str(exc)) from exc
+            raise HTTPException(429, BUDGET_MESSAGE) from exc
         except ValueError as exc:
             raise HTTPException(413, str(exc)) from exc
         log.info("handle thread=%s intent=%s turns=%d stopped=%s pending=%d latency_ms=%.0f", res.thread_id, res.intent, res.turns, res.stopped_reason,

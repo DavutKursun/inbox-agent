@@ -4,16 +4,29 @@ This file is the build spec. Read it fully before writing code. Work milestone b
 milestone; after each milestone stop, show how to run it, and wait for Davut's OK.
 Section 0 says where we are and what changed from the original plan.
 
-## 0. Status (updated 2026-10-19)
+## 0. Status (updated 2026-10-20)
 
 **Project complete (2026-10-19).** Milestones 1 to 5 are done: tools, policy and fixtures; the agent loop on two providers; 120
-reviewed scenarios with the eval harness and three prompt versions on claude-haiku-5-5 (v3: intent 0.892, unsafe (policy) 0,
-injection 0, escalation recall 1.000, $0.0015 per email); FastAPI + Gradio review UI with a working approval queue, Docker image
-and the live Space https://huggingface.co/spaces/DavutKursun/inbox-agent; the Google Calendar adapter (mocked-client tests) and
-the n8n workflow (headless validation, see n8n/README.md); README on one screen. 90 tests, CI green.
+reviewed scenarios with the eval harness and four prompt versions on claude-haiku-5-5; FastAPI + Gradio review UI with a working
+approval queue, Docker image and the live Space https://huggingface.co/spaces/DavutKursun/inbox-agent; the Google Calendar
+adapter (mocked-client tests) and the n8n workflow (headless validation, see n8n/README.md); README on one screen. 93 tests
+(one skipped without hadolint), CI green.
+
+**The demo runs the evaluated model (2026-10-20).** Deployed: v2, prompt 2026-10-19.1 on claude-haiku-5-5 (intent 0.908,
+unsafe (policy) 0, injection 0, escalation recall 1.000, 23 unexpected escalations, $0.0015 per email), chosen by a rule fixed
+before the v4 run: unsafe 0 and injection 0 required, then the highest intent accuracy among versions with escalation recall
+≥ 0.90, ties to fewer unexpected escalations. v4 (prompt 2026-10-19.3, `search_kb` capped at 2 per thread) ended v3's runaway
+searching but scored intent 0.842, so `policy.CALL_LIMITS` is empty in the deployed code; the guard stays, tested with the cap
+switched on. Space variables: `LLM_PROVIDER=anthropic`, `ANTHROPIC_MODEL=claude-haiku-5-5`, `MAX_DAILY_USD=0.20`,
+`MAX_DAILY_CALLS=450`; past a cap the UI and the 429 say "Daily demo budget reached, try tomorrow."; the missing-key banner
+and the 503 name the configured provider's key. booking-12 corrected by Davut on 2026-10-19 (`data/scenarios/CHANGELOG.md`;
+v1 to v3 rescored from saved records). Results: `eval/results/claude-haiku-5-5-v1.*` to `-v4.*`, DESIGN.md "Findings".
 
 Manual-only items left (they need Davut's accounts or a decision):
-- Add the Groq key as the Space secret `LLM_API_KEY`; until then the live demo's Handle shows a banner and `/handle` answers 503.
+- Add the Anthropic key as the Space secret `ANTHROPIC_API_KEY`; until then the live demo's Handle shows a banner and
+  `/handle` answers 503.
+- Decide two scenario expectations that look wrong (DESIGN.md "Findings"): booking-14 (its dates are inside the 14-day
+  horizon) and reschedule_cancel-05 (the requested 17:00 is taken in the fixtures); neither changes the deployed version.
 - Live Google Calendar: OAuth client JSON in `.secrets/`, `python -m integrations.gcal auth`, a run with `CALENDAR_MODE=google`
   on a test calendar, README screenshots.
 - n8n live run: Gmail OAuth2 and Telegram credentials, a public decision webhook URL and token, then the 60-second GIF.
@@ -31,7 +44,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (90, one skipped without hadolint) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (93, one skipped without hadolint) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -105,7 +118,7 @@ ten worst scenarios with trace links). Metric definitions: DESIGN.md "Evaluation
 
 **Milestone 3 (done 2026-10-19).** Results: README table (v1/v2/v3 rows) and DESIGN.md "Findings" (rule effects, the
 over-escalation / over-booking trade-off, five failure examples with traces in docs/traces/, safety statement). Files:
-`eval/results/claude-haiku-5-5-v1.*`, `-v2.*`, `claude-haiku-5-5.*` (= v3, prompt 2026-10-19.2, the current prompt).
+`eval/results/claude-haiku-5-5-v1.*`, `-v2.*`, `-v3.*` (v3 = prompt 2026-10-19.2; superseded 2026-10-20, v2 is deployed).
 Open items carried into M4/M5: the qwen 120-scenario run on the free-tier quota (≈1M tokens, daily batches of ~24, the
 paced two-hour job), the gpt-oss comparison row, and the residual v3 misses listed in the Findings.
 
@@ -130,6 +143,7 @@ SDK, public, CPU basic), set variables `LLM_PROVIDER=openai_compat`, `LLM_BASE_U
 `LLM_MODEL=qwen/qwen3.8-27b`, `LLM_REASONING_EFFORT=low`, `MAX_DAILY_CALLS=150`, `MAX_DAILY_USD=1`, `MAX_TURNS=8`, the secret
 `LLM_API_KEY` (Groq; optionally `ANTHROPIC_API_KEY` + `LLM_PROVIDER=anthropic`), then push a deploy branch whose README.md is
 `space/README.md` (commands in the step-3 report / README "Deploy"). After the Space is live: README badge + link.
+Superseded 2026-10-20: the Space now runs claude-haiku-5-5 (variables at the top of §0).
 
 **Milestone 5 (done 2026-10-19):** Google Calendar adapter with mocked-client tests (live OAuth is manual), the n8n workflow
 validated headlessly with n8n 2.43.8 (import, round trip, manual path against the live Space and a local fake-provider run,

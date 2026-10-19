@@ -25,6 +25,7 @@ from .schema import AgentResult, Email, PendingAction
 from .store import Store
 
 PASTE = "paste your own"
+BUDGET_MESSAGE = "Daily demo budget reached, try tomorrow."
 SAMPLE_ORDER = ("booking", "cancel", "question", "billing", "complaint", "injection")  # the demo order; others follow alphabetically
 REPO = "https://github.com/DavutKursun/inbox-agent"
 TRACE_HEADERS = ["turn", "tool", "args", "status", "result"]
@@ -79,9 +80,11 @@ class ReviewUI:
         """A warning for the top of the page when no LLM is configured (the queue and traces still work)."""
         if self.provider is not None:
             return ""
-        return ("⚠️ **No LLM key configured.** Handle answers with an error and `POST /handle` with 503; approvals, traces and "
-                "the calendar still work. Set `LLM_API_KEY` (Groq) or `ANTHROPIC_API_KEY` with `LLM_PROVIDER=anthropic` as a "
-                "secret, or start with `INBOX_FAKE_PROVIDER=1` for a local check.")
+        from .providers import missing_key_name
+
+        return (f"⚠️ **No LLM key configured.** Add the `{missing_key_name(self.settings)}` secret to run the agent; until then Handle "
+                "answers with an error and `POST /handle` with 503, while approvals, traces and the calendar still work. "
+                "Local check without a key: start with `INBOX_FAKE_PROVIDER=1`.")
 
     def header(self) -> str:
         spend = self.budget.read()
@@ -133,15 +136,17 @@ class ReviewUI:
         except ValidationError as exc:
             return UIResult(error="Invalid email: " + "; ".join(e["msg"] for e in exc.errors()))
         if self.provider is None:
-            return UIResult(error="No LLM provider configured: set a key in .env or start with INBOX_FAKE_PROVIDER=1.")
+            from .providers import missing_key_name
+
+            return UIResult(error=f"No LLM provider configured: add the {missing_key_name(self.settings)} secret, or start with INBOX_FAKE_PROVIDER=1.")
         if len(email.body) > self.settings.max_email_chars:
             return UIResult(error=f"Email body longer than {self.settings.max_email_chars} characters.")
         if not self.budget.can_spend():
-            return UIResult(error="Daily budget exhausted; try again tomorrow.")
+            return UIResult(error=BUDGET_MESSAGE)
         try:
             res = self.agent.handle(email)
-        except RuntimeError as exc:
-            return UIResult(error=str(exc))
+        except RuntimeError:  # the budget guard inside the loop
+            return UIResult(error=BUDGET_MESSAGE)
         self._tick += 1
         d = res.draft_reply
         chips = " ".join(f"`{c}`" for c in (d.citations if d else [])) or "_no citations_"
