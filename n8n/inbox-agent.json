@@ -1,0 +1,428 @@
+{
+  "id": "InboxAgentFlow01",
+  "name": "inbox-agent: email → agent → approval",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## inbox-agent\nEmail in → the agent's `POST /handle` → if something was queued, the approver gets Approve / Reject links → the decision webhook calls `POST /approve/{id}` or `/reject/{id}`.\n\nSettings live in **Normalize email** and **Check decision** (or `INBOX_AGENT_*` env vars). Credentials to add after import: Gmail OAuth2, Telegram. See n8n/README.md.",
+        "height": 260,
+        "width": 420
+      },
+      "id": "e9e2ecce-164e-5aa7-a7d1-0fe28d974b50",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -40
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "08150417-5418-5e55-b4c4-ebcc8783908f",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The booking sample from data/samples/booking.json, for a manual test run.\nreturn [{ json: {\"from\": \"torhan.akca0@example.com\", \"subject\": \"Check-up appointment\", \"body\": \"Hi, I'd like to book a check-up next week, ideally Tuesday or Wednesday afternoon. Thanks, Torhan\"} }];"
+      },
+      "id": "4d90fcfe-b16b-56c0-9427-8cf61c0a9479",
+      "name": "Booking sample",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "label:inbox-agent",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "5922009f-d679-5832-9ec5-d4bfca8ee6cc",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function env(name) {\n  try { return $env[name] || ''; } catch (e) { return ''; }  // n8n 2.x blocks $env in Code nodes unless N8N_BLOCK_ENV_ACCESS_IN_NODE=false\n}\n// Settings: edit the defaults here, or set the INBOX_AGENT_* environment variables (see n8n/README.md).\nconst settings = {\n  agent_url: (env('INBOX_AGENT_URL') || 'https://davutkursun-inbox-agent.hf.space').replace(/\\/+$/, ''),\n  decision_url: env('INBOX_AGENT_DECISION_URL') || 'http://localhost:5678/webhook/inbox-agent-decision',\n  decision_token: env('INBOX_AGENT_DECISION_TOKEN'),\n  telegram_chat_id: env('INBOX_AGENT_TELEGRAM_CHAT_ID'),\n};\nconst MAX_CHARS = 2000;  // the agent refuses longer bodies with 413\nreturn $input.all().map((item) => {\n  const j = item.json;\n  const from = j.from?.value?.[0]?.address || j.from?.text || j.From || j.from || '';\n  const subject = String(j.subject || j.Subject || '').slice(0, 300);\n  const body = String(j.text || j.textPlain || j.body || j.snippet || '').trim().slice(0, MAX_CHARS);\n  return { json: { ...settings, email: { from: String(from), subject, body } } };\n});"
+      },
+      "id": "e70869b4-e325-5348-a718-60a2dc7770b7",
+      "name": "Normalize email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.agent_url }}/handle",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.email) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "2a8edaae-5dce-5704-83f0-ab91c0a6485e",
+      "name": "Agent: POST /handle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "0fdee4d4-cf72-5d9c-b775-de1ff3dfee7d",
+              "leftValue": "={{ ($json.actions_pending || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d59976e-2244-5ba8-b286-ac26e15d9f0d",
+      "name": "Needs approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "49da4ece-9c3d-5981-a0a2-347c4cbb06f4",
+      "name": "No approval needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per queued action, with Approve / Reject links that open the decision webhook below.\nconst s = $('Normalize email').first().json;\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  for (const a of r.actions_pending || []) {\n    const link = (decision) => `${s.decision_url}?action_id=${encodeURIComponent(a.action_id)}&decision=${decision}`\n      + (s.decision_token ? `&token=${encodeURIComponent(s.decision_token)}` : '');\n    const args = Object.entries(a.args || {}).map(([k, v]) => `${k}=${v}`).join(', ');\n    const message = [\n      `<b>Approval needed</b>: ${esc(a.tool)} (${esc(args)})`,\n      `From ${esc(a.customer_email)}, intent ${esc(r.intent)}`,\n      `Summary: ${esc(r.summary)}`,\n      r.draft_reply ? `Draft reply: ${esc(r.draft_reply.subject)}` : '',\n      `<a href=\"${esc(link('approve'))}\">Approve</a> | <a href=\"${esc(link('reject'))}\">Reject</a>`,\n    ].filter(Boolean).join('\\n');\n    out.push({ json: { action_id: a.action_id, tool: a.tool, thread_id: r.thread_id, customer_email: a.customer_email,\n                       telegram_chat_id: s.telegram_chat_id, approve_url: link('approve'), reject_url: link('reject'), message } });\n  }\n}\nreturn out;"
+      },
+      "id": "70314cee-f827-5a7c-8edb-59597c2bbcdd",
+      "name": "Approval request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "6bb60047-2432-56dd-b414-51d10d1b18b6",
+              "leftValue": "={{ String($json.telegram_chat_id || '').length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d7efc8d-8549-575a-a212-d36008f2a93a",
+      "name": "Telegram configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.telegram_chat_id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "125bc4f3-295a-5575-9451-3c7f8eb55a5c",
+      "name": "Ask approver (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "85af05a4-aed5-5900-9b28-f607990c7a2d",
+      "name": "Approval links (no Telegram configured)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "path": "inbox-agent-decision",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "aa143881-de81-5e97-a4e8-a56f59f1d687",
+      "name": "Approval link clicked",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        820
+      ],
+      "webhookId": "a994a508-068b-52a0-a5df-7fa55aac0727"
+    },
+    {
+      "parameters": {
+        "jsCode": "function env(name) {\n  try { return $env[name] || ''; } catch (e) { return ''; }  // n8n 2.x blocks $env in Code nodes unless N8N_BLOCK_ENV_ACCESS_IN_NODE=false\n}\n// Validates the clicked link before anything reaches the agent: a known decision, a well-formed id, the shared token.\nconst AGENT_URL = (env('INBOX_AGENT_URL') || 'https://davutkursun-inbox-agent.hf.space').replace(/\\/+$/, '');\nconst TOKEN = env('INBOX_AGENT_DECISION_TOKEN');\nconst q = $input.first().json.query || {};\nif (!['approve', 'reject'].includes(q.decision)) throw new Error('decision must be approve or reject');\nif (!/^act_[a-f0-9]{10}$/.test(q.action_id || '')) throw new Error('malformed action_id');\nif (TOKEN && q.token !== TOKEN) throw new Error('wrong or missing token');\nreturn [{ json: { action_id: q.action_id, decision: q.decision, url: `${AGENT_URL}/${q.decision}/${q.action_id}` } }];"
+      },
+      "id": "2eaba070-ea55-5de3-820a-3d0cad274d8d",
+      "name": "Check decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "b7d70255-9f38-577c-9431-285e814c8948",
+      "name": "Agent: POST approve or reject",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.action_id }} {{ $json.tool }}: {{ $json.status }}",
+        "options": {}
+      },
+      "id": "6f587609-ca60-53c1-8f15-b978f8dfe277",
+      "name": "Reply to approver",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        820
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Booking sample",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking sample": {
+      "main": [
+        [
+          {
+            "node": "Normalize email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize email": {
+      "main": [
+        [
+          {
+            "node": "Agent: POST /handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent: POST /handle": {
+      "main": [
+        [
+          {
+            "node": "Needs approval?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs approval?": {
+      "main": [
+        [
+          {
+            "node": "Approval request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No approval needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval request": {
+      "main": [
+        [
+          {
+            "node": "Telegram configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram configured?": {
+      "main": [
+        [
+          {
+            "node": "Ask approver (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Approval links (no Telegram configured)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval link clicked": {
+      "main": [
+        [
+          {
+            "node": "Check decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check decision": {
+      "main": [
+        [
+          {
+            "node": "Agent: POST approve or reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent: POST approve or reject": {
+      "main": [
+        [
+          {
+            "node": "Reply to approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

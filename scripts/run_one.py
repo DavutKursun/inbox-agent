@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from inbox_agent.agent import Agent  # noqa: E402
-from inbox_agent.calendar import FakeCalendar  # noqa: E402
-from inbox_agent.config import fixtures_today, settings  # noqa: E402
+from inbox_agent.calendar import make_calendar_factory  # noqa: E402
+from inbox_agent.config import CALENDAR_JSON, fixtures_today, settings  # noqa: E402
 from inbox_agent.costs import BudgetGuard, format_cost  # noqa: E402
 from inbox_agent.crm import CRM  # noqa: E402
 from inbox_agent.kb import KnowledgeBase  # noqa: E402
@@ -33,9 +33,10 @@ from inbox_agent.tools import Context  # noqa: E402
 def default_ctx_factory(today: dt.date | None = None):
     kb = KnowledgeBase()
     store = Store()
+    calendar = make_calendar_factory(settings, CALENDAR_JSON, today or fixtures_today())  # CALENDAR_MODE=google: live
 
     def make(thread_id: str, customer_email: str) -> Context:
-        return Context(crm=CRM(), calendar=FakeCalendar(today=today), kb=kb, store=store, thread_id=thread_id, customer_email=customer_email)
+        return Context(crm=CRM(), calendar=calendar(), kb=kb, store=store, thread_id=thread_id, customer_email=customer_email)
 
     return make
 

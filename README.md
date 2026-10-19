@@ -1,84 +1,58 @@
-# inbox-agent — an email-handling agent with tools, approval gates and an n8n twin
+# inbox-agent: an email agent with tools, an approval queue and an honest evaluation
 
-Reads a customer email, looks the customer up, searches the knowledge base, finds or books
-appointment slots, drafts a reply — and **asks a human before anything irreversible**. Built for a
-fictional dental clinic, evaluated on 120 scenarios including prompt-injection attacks, and delivered
-twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clients ask for both.
+[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/DavutKursun/inbox-agent)
+[![ci](https://github.com/DavutKursun/inbox-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/DavutKursun/inbox-agent/actions/workflows/ci.yml)
 
-> **Live demo:** Hugging Face Space `DavutKursun/inbox-agent` (Docker; see "Deploy") · **n8n workflow:** `n8n/inbox-agent.json` (_Milestone 5_)
+**Live demo:** [huggingface.co/spaces/DavutKursun/inbox-agent](https://huggingface.co/spaces/DavutKursun/inbox-agent) (review UI at `/ui`, API at `/docs`)
 
-![demo: handle a booking, approve it in the queue, watch the slot appear](docs/img/demo.gif)
+![handle a booking email, approve it in the queue, watch the slot appear](docs/img/demo.gif)
 
-## Results (120 reviewed scenarios, claude-haiku-5-5 at list price, three prompt versions)
+It reads a customer email for a fictional dental clinic, looks the sender up, searches the clinic's knowledge base, finds
+appointment slots and drafts a reply. Booking and cancelling wait in an approval queue until a human approves them, and nothing
+is ever sent. The same flow also runs as an [n8n workflow](n8n/README.md) that calls the agent's API.
 
-| run | intent acc. | tool-plan P/R | unsafe (policy) | scenario-forbidden calls | injection success | escalation recall | unexpected escalations | approval match | citation rate | note leaks (literal/key-term) | turns | cost / email | p50 latency |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| v1: prompt 2026-10-18.1 | 0.892 | 0.994 / 0.944 | **0** | 3 | **0** | 0.778 | 5 | 0.917 | 0.981 | 0 / 3 | 2.8 | $0.0013 | 4.5 s |
-| v2: prompt 2026-10-19.1 | 0.908 | 0.989 / 0.977 | **0** | 7 | **0** | 1.000 | 23 | 0.917 | 1.000 | 0 / 3 | 2.9 | $0.0015 | 4.4 s |
-| v3: prompt 2026-10-19.2 | 0.892 | 0.992 / 0.956 | **0** | 5 | **0** | 1.000 | 18 | 0.900 | 1.000 | 0 / 1 | 2.88 | $0.0015 | 4.0 s |
+## Safety design
+- **A policy table, not prompt wording** ([policy.py](inbox_agent/policy.py)): reading, searching and drafting run at once;
+  `book_slot` and `cancel_booking` are queued for approval; sending, refunds and deletes do not exist, so any such call is refused.
+- **A real approval queue**: queued actions are checked when they are queued (the booking belongs to the sender, the slot is free
+  and inside opening hours) and run only on Approve; Reject leaves the calendar untouched.
+- **Injection handling**: the email is data, wrapped and labelled as such; explicit override phrases in English or Turkish mark
+  the thread suspicious, which refuses every approval-level call and escalates; lookups are limited to the sender; a draft can
+  cite only knowledge-base chunks found in the same thread.
 
-Hand-checked: the ten worst scenarios of every run were read in full (traces under `eval/results/traces/`, five examples in
-[docs/traces/](docs/traces/)); unsafe (policy) and injection success were 0 in every run. Definitions in [docs/DESIGN.md](docs/DESIGN.md).
+## Results: the deployed code (prompt 2026-10-19.2) on 120 reviewed scenarios
+| model | intent | tool plan P / R | unsafe actions | injection success | escalation recall | citation rate | turns / email | cost / email | latency p50 / p95 |
+|---|---|---|---|---|---|---|---|---|---|
+| claude-haiku-5-5, 120 scenarios | 0.892 | 0.992 / 0.956 | **0** | **0** | 1.000 | 1.000 | 2.9 | $0.0015 | 4.0 s / 7.6 s |
+| qwen/qwen3.8-27b, the 6 samples | 6 of 6 | – | **0** | **0** | 2 of 2 | 3 of 3 | 3.0 | free tier | 46 s / 70 s |
 
-qwen/qwen3.8-27b (Groq, free tier, the configured default): 6 of 6 sample emails finished via the finish tool with 0 unsafe actions,
-3.0 turns and 4.7–8.8k tokens per email, p50 latency 46 s under the free-tier queue; its 120-scenario run is pending on the
-free-tier quota (≈1M tokens at 200k per day per model). gpt-oss-120b finishes only through the text fallback and is kept as a
-comparison model.
+The demo runs **qwen/qwen3.8-27b on Groq's free tier**, capped at 150 model calls and $1 per day; its 120-scenario run is pending
+on that quota, and free-tier queueing explains its latency. **The three prompt versions were tuned on these same 120 scenarios,
+so the Haiku numbers are optimistic; a held-out scenario set is the next step.** Run history, the ten worst scenarios with
+traces and the metric definitions are in [docs/DESIGN.md](docs/DESIGN.md).
 
-## How it works
-1. **Tools with schemas** (`inbox_agent/tools.py`): lookup_customer · search_kb · find_slots · book_slot ·
-   cancel_booking · draft_reply · escalate · finish. The model can only call these, with Pydantic-validated
-   arguments.
-2. **Policy table** (`policy.py`): read/search/draft run immediately; book/cancel are checked (ownership, free slot, future, 30-min grid) and **queued for approval**;
-   send-email/refund/delete do not exist. A suspicious email (injection markers) makes every approval-level
-   call refused outright and escalates the thread.
-3. **Loop** (`agent.py`, ~150 lines, no framework): model → tool calls → results, max 6 turns, full trace per
-   thread. Drafts that state a price or policy without citing a chunk that search_kb returned in the same thread are flagged "unverified claim".
-4. **Approval queue** (`store.py`): a human approves or rejects from the UI/API; only then does the tool run.
-5. **Evaluation**: 120 scenarios in 6 groups (booking, reschedule/cancel, question, billing, complaint,
-   adversarial) with expected intent, required/forbidden tools and approval expectations.
+## Custom agent vs n8n: when to use which
+| | custom agent (this repo) | n8n ([inbox-agent.json](n8n/inbox-agent.json)) |
+|---|---|---|
+| use it for | the decisions: tools, policy, approval gate, evaluation | the plumbing: Gmail trigger, approvals in Telegram or Slack, other apps |
+| changes | code, tests and an eval rerun | nodes edited in the n8n UI |
+| safety | enforced in code and measured | inherited, because the workflow calls the agent's API |
+
+Use both: the agent behind an API makes the decisions and n8n wires it to the inbox and the approver, which is the split here.
 
 ## Run
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env                 # free Groq/Cerebras key; no paid API needed
-python scripts/make_fixtures.py --today 2026-10-19   # seeded + dated; the committed fixtures use this date
-python scripts/run_one.py data/samples/booking.json
-pytest -q
-uvicorn app:app --port 7860           # API + review UI at /ui; INBOX_FAKE_PROVIDER=1 runs it without a key
+pip install -r requirements-dev.txt && python scripts/make_fixtures.py --today 2026-10-19   # seeded fake CRM, calendar, samples
+INBOX_FAKE_PROVIDER=1 uvicorn app:app --port 7860   # no key needed; open http://localhost:7860/ui
+pytest -q                                           # 90 tests, no network
+python scripts/eval.py --no-pacing --delay 8 && python scripts/eval_report.py   # the 120 scenarios, needs an LLM key
 ```
 
-## API
-```bash
-curl -s localhost:7860/health
-curl -s -X POST localhost:7860/handle -H 'content-type: application/json' \
-  -d '{"from": "torhan.akca0@example.com", "subject": "Check-up", "body": "Could I book a check-up next Tuesday afternoon?"}'
-curl -s localhost:7860/pending                     # queued book_slot / cancel_booking actions
-curl -s -X POST localhost:7860/approve/act_abc123   # runs the queued tool; or /reject/act_abc123
-curl -s localhost:7860/trace/thr_abc123             # the thread's trace as a JSON list
-```
-Errors: 422 invalid email, 413 body over 2,000 characters, 429 daily budget exhausted, 503 no provider key, 404 unknown action
-or thread. Interactive docs at `/docs`. The review UI at `/ui` has the sample inbox on the left, the result with a
-thought-free trace in the middle, and the approval queue on the right: Approve / Reject call the same resolve path as
-the API, and the calendar expander shows a slot appearing only after approval.
+## Limitations and next steps
+- Gmail drafts as the safe "send" are not built yet; live Google Calendar is implemented and unit-tested with a mocked client,
+  but its OAuth setup is a manual step that has not been run.
+- A held-out scenario set, and the qwen 120-scenario run.
+- The demo's approval queue is public on purpose; a real deployment puts `/approve` and `/reject` behind authentication.
+- The CRM, calendar and knowledge base are fakes, and every customer is generated data.
 
-## Deploy
-```bash
-docker build -t inbox-agent . && docker run --rm -p 7860:7860 -e INBOX_FAKE_PROVIDER=1 inbox-agent   # no key needed
-docker run --rm -p 7860:7860 -e LLM_API_KEY=gsk_... inbox-agent                                      # Groq, qwen/qwen3.8-27b
-```
-The image runs as a non-root user on port 7860, rebuilds the seeded CRM at start-up when it is missing, and keeps the
-budget guard at 150 calls and $1 per day. On a Hugging Face Docker Space (`space/README.md` holds the Space header) the
-`.env` file is never read: settings come from the Space's variables and secrets, runtime state lives in `/tmp`, and a
-missing key shows a banner in the UI and 503 on `/handle` instead of crashing. Record the GIF with
-`python scripts/demo_gif.py` (Playwright + Pillow, against a local fake-provider run).
-
-## Repository
-`inbox_agent/` — schema, policy, tools, agent loop, providers (Groq/Cerebras + Claude tool calling), crm (SQLite),
-calendar (fake + interface), kb (BM25 over markdown; a small cousin of [docs-chat](https://github.com/DavutKursun/docs-chat)),
-store, costs · `scripts/` — make_fixtures, run_one, make_scenarios, review_scenarios (+ eval from M3 step 2) · `integrations/` — Google Calendar,
-Gmail (M5) · `n8n/` — workflow JSON (M5) · `data/` — kb pages, samples, scenarios · `docs/DESIGN.md` · `tests/`
-
-## License
-MIT. All customer data is fictional (Faker, seeded).
+MIT licence. The retriever is a small cousin of [docs-chat](https://github.com/DavutKursun/docs-chat).

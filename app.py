@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi import Path as PathParam
 
 from inbox_agent.agent import Agent
-from inbox_agent.calendar import FakeCalendar
+from inbox_agent.calendar import make_calendar_factory
 from inbox_agent.config import CALENDAR_JSON, CRM_DB, ROOT, RUNTIME, SAMPLES, Settings, fixtures_today
 from inbox_agent.config import settings as default_settings
 from inbox_agent.costs import BudgetGuard
@@ -57,9 +57,10 @@ def create_app(*, settings: Settings = default_settings, provider=None, crm_path
         except ProviderError as exc:
             log.warning("no LLM provider: %s (POST /handle will answer 503; approvals still work)", exc)
     budget = budget or BudgetGuard(settings.budget_file, settings.max_daily_usd, settings.max_daily_calls)
+    calendar = make_calendar_factory(settings, calendar_path, today)  # the fake file, or Google Calendar with CALENDAR_MODE=google
 
     def ctx_factory(thread_id: str, customer_email: str) -> Context:
-        return Context(crm=CRM(crm_path), calendar=FakeCalendar(calendar_path, today=today), kb=kb, store=store, thread_id=thread_id, customer_email=customer_email)
+        return Context(crm=CRM(crm_path), calendar=calendar(), kb=kb, store=store, thread_id=thread_id, customer_email=customer_email)
 
     agent = Agent(provider, ctx_factory, budget=budget, today=today)  # resolve() works without a provider
     app = FastAPI(title="inbox-agent", version="0.4.0", description="Email agent with tools and an approval queue (fictional Nova Dental Clinic).")
@@ -128,7 +129,7 @@ def create_app(*, settings: Settings = default_settings, provider=None, crm_path
 
         from inbox_agent.ui import ReviewUI
 
-        review = ReviewUI(agent, store, budget, provider, settings, calendar_path, today, samples_dir)
+        review = ReviewUI(agent, store, budget, provider, settings, calendar_path, today, samples_dir, calendar_factory=calendar)
         app.state.ui = review
         gr.mount_gradio_app(app, review.build(), path="/ui")
     return app

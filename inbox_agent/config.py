@@ -71,7 +71,8 @@ class Settings:
     max_daily_usd: float = field(default_factory=lambda: float(_env("MAX_DAILY_USD", "1")))
     max_daily_calls: int = field(default_factory=lambda: int(_env("MAX_DAILY_CALLS", "150")))
     budget_file: Path = field(default_factory=lambda: Path(_env("BUDGET_FILE", str(TMP / ".budget.json") if ON_SPACE else ".budget.json")))
-    calendar_mode: str = field(default_factory=lambda: _env("CALENDAR_MODE", "fake"))
+    calendar_mode: str = field(default_factory=lambda: _env("CALENDAR_MODE", "fake"))  # fake | google (integrations/gcal.py)
+    gcal_calendar_id: str = field(default_factory=lambda: _env("GCAL_CALENDAR_ID", "primary"))
     gmail_mode: str = field(default_factory=lambda: _env("GMAIL_MODE", "off"))
 
 

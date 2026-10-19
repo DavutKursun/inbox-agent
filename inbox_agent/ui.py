@@ -55,9 +55,10 @@ class UIResult:
 
 class ReviewUI:
     def __init__(self, agent: Agent, store: Store, budget: BudgetGuard, provider, settings, calendar_path: Path | str, today: dt.date,
-                 samples_dir: Path | str = SAMPLES) -> None:
+                 samples_dir: Path | str = SAMPLES, calendar_factory=None) -> None:
         self.agent, self.store, self.budget, self.provider, self.settings = agent, store, budget, provider, settings
         self.calendar_path, self.today, self.samples_dir = Path(calendar_path), today, Path(samples_dir)
+        self.calendar_factory = calendar_factory or (lambda: FakeCalendar(self.calendar_path, today=self.today))  # same calendar as the agent
         self._tick = 0
 
     # --- data for the panels ---------------------------------------------------------------
@@ -113,14 +114,8 @@ class ReviewUI:
         return rows
 
     def calendar_rows(self, days: int = 14) -> list[list]:
-        cal = FakeCalendar(self.calendar_path, today=self.today)
-        end = (self.today + dt.timedelta(days=days)).isoformat()
-        rows = []
-        for b in sorted(cal.busy, key=lambda b: b["start"]):
-            if self.today.isoformat() <= b["start"][:10] <= end:
-                start = dt.datetime.fromisoformat(b["start"])
-                rows.append([weekday_name(start), b["start"], b.get("duration_min", 30), b.get("title", "")])
-        return rows
+        events = self.calendar_factory().events(self.today, self.today + dt.timedelta(days=days))
+        return [[weekday_name(dt.datetime.fromisoformat(e["start"])), e["start"], e["duration_min"], e["title"]] for e in events]
 
     def trace_rows(self, thread_id: str) -> list[list]:
         rows = []

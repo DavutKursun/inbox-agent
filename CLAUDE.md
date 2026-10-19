@@ -6,11 +6,19 @@ Section 0 says where we are and what changed from the original plan.
 
 ## 0. Status (updated 2026-10-19)
 
-**Milestones 1, 2 and 3 are done (M3 closed 2026-10-19: 120 reviewed scenarios, eval harness, three prompt versions on
-claude-haiku-5-5; v3: intent 0.892, unsafe (policy) 0, injection 0,
-escalation recall 1.000, unexpected escalations 18, $0.0015 per email).
-Milestone 4 is done (FastAPI endpoints, Gradio review UI with the working approval queue, Dockerfile + Space config +
-demo GIF); the Space itself is pushed by Davut (steps below). Next: Milestone 5, after Davut's go.**
+**Project complete (2026-10-19).** Milestones 1 to 5 are done: tools, policy and fixtures; the agent loop on two providers; 120
+reviewed scenarios with the eval harness and three prompt versions on claude-haiku-5-5 (v3: intent 0.892, unsafe (policy) 0,
+injection 0, escalation recall 1.000, $0.0015 per email); FastAPI + Gradio review UI with a working approval queue, Docker image
+and the live Space https://huggingface.co/spaces/DavutKursun/inbox-agent; the Google Calendar adapter (mocked-client tests) and
+the n8n workflow (headless validation, see n8n/README.md); README on one screen. 90 tests, CI green.
+
+Manual-only items left (they need Davut's accounts or a decision):
+- Add the Groq key as the Space secret `LLM_API_KEY`; until then the live demo's Handle shows a banner and `/handle` answers 503.
+- Live Google Calendar: OAuth client JSON in `.secrets/`, `python -m integrations.gcal auth`, a run with `CALENDAR_MODE=google`
+  on a test calendar, README screenshots.
+- n8n live run: Gmail OAuth2 and Telegram credentials, a public decision webhook URL and token, then the 60-second GIF.
+- Gmail drafts as the safe send (not built), the qwen 120-scenario run on the free-tier quota (~1M tokens, daily batches),
+  a held-out scenario set (the prompts were tuned on the 120), and the gpt-oss comparison row.
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -23,7 +31,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (80, one skipped without hadolint) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (90, one skipped without hadolint) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -38,7 +46,10 @@ Implemented:
 - `Dockerfile` + `.dockerignore` (non-root, port 7860, fixtures rebuilt at start), `space/README.md` (Space header), Space mode
   in `config.py` (`SPACE_ID`: no .env, runtime + budget in /tmp; `INBOX_DATA_DIR` / `INBOX_RUNTIME_DIR` overrides), UI banner
   without a key, `scripts/demo_gif.py` → `docs/img/demo.gif`, `tests/test_deploy.py`, CI docker job (hadolint + build + smoke)
-- NOT yet: integrations (Google Calendar, Gmail drafts), n8n workflow + GIF, README decision section, DESIGN.md wrap-up.
+- `integrations/gcal.py` (Google Calendar behind the Calendar protocol; shared slot rules in `calendar.py`; `CALENDAR_MODE=google`
+  via `make_calendar_factory`), `tests/test_gcal.py` (mocked client), `n8n/inbox-agent.json` + `n8n/README.md` (Gmail → /handle →
+  Telegram approval → /approve; headless validation), `tests/test_n8n.py`
+- NOT built: Gmail drafts.
 
 Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
 - `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
@@ -120,10 +131,9 @@ SDK, public, CPU basic), set variables `LLM_PROVIDER=openai_compat`, `LLM_BASE_U
 `LLM_API_KEY` (Groq; optionally `ANTHROPIC_API_KEY` + `LLM_PROVIDER=anthropic`), then push a deploy branch whose README.md is
 `space/README.md` (commands in the step-3 report / README "Deploy"). After the Space is live: README badge + link.
 
-**Milestone 5 (wait for Davut's go):** `integrations/gcal.py` behind the `Calendar` protocol (OAuth desktop flow, token in
-.secrets/, `CALENDAR_MODE=google`, manual test + screenshots), optional Gmail drafts, `n8n/inbox-agent.json` (Gmail trigger →
-HTTP /handle → IF pending → Slack/Telegram Approve/Reject → HTTP /approve) + a 60-second GIF, README "custom agent vs n8n"
-section, DESIGN.md wrap-up.
+**Milestone 5 (done 2026-10-19):** Google Calendar adapter with mocked-client tests (live OAuth is manual), the n8n workflow
+validated headlessly with n8n 2.43.8 (import, round trip, manual path against the live Space and a local fake-provider run,
+decision call replayed with curl), README "Custom agent vs n8n" and DESIGN.md "Integrations". Gmail drafts not built.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 
