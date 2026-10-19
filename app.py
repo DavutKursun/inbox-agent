@@ -1,5 +1,5 @@
-"""inbox-agent API (Milestone 4): FastAPI endpoints around the agent and its approval queue. The Gradio review UI is
-mounted on this app in step 2.
+"""inbox-agent API (Milestone 4): FastAPI endpoints around the agent and its approval queue, with the Gradio review UI
+mounted at /ui.
 
 Run:            uvicorn app:app --port 7860
 Without a key:  INBOX_FAKE_PROVIDER=1 uvicorn app:app --port 7860   (a deterministic stand-in drives the loop)
@@ -20,7 +20,7 @@ from fastapi import Path as PathParam
 
 from inbox_agent.agent import Agent
 from inbox_agent.calendar import FakeCalendar
-from inbox_agent.config import CALENDAR_JSON, CRM_DB, RUNTIME, Settings, fixtures_today
+from inbox_agent.config import CALENDAR_JSON, CRM_DB, RUNTIME, SAMPLES, Settings, fixtures_today
 from inbox_agent.config import settings as default_settings
 from inbox_agent.costs import BudgetGuard
 from inbox_agent.crm import CRM
@@ -36,8 +36,10 @@ ACTION_ID = r"^[A-Za-z0-9_-]{1,64}$"
 
 
 def create_app(*, settings: Settings = default_settings, provider=None, crm_path: Path | str = CRM_DB, calendar_path: Path | str = CALENDAR_JSON,
-               store_root: Path | str = RUNTIME, budget: BudgetGuard | None = None, today=None, kb: KnowledgeBase | None = None) -> FastAPI:
-    """Build the app with its singletons. Tests pass a scripted provider, throwaway fixture paths and a temp budget file."""
+               store_root: Path | str = RUNTIME, budget: BudgetGuard | None = None, today=None, kb: KnowledgeBase | None = None, ui: bool = True,
+               samples_dir: Path | str = SAMPLES) -> FastAPI:
+    """Build the app with its singletons and, by default, the review UI at /ui. Tests pass a scripted provider, throwaway
+    fixture paths and a temp budget file."""
     kb = kb or KnowledgeBase()
     store = Store(store_root)
     today = today or fixtures_today()
@@ -113,6 +115,14 @@ def create_app(*, settings: Settings = default_settings, provider=None, crm_path
         return {"status": "ok", "model": provider.model if provider else None, "provider": provider.name if provider else None,
                 "pending_count": len(store.pending()), "budget": {"calls_today": spend.calls, "usd_today": round(spend.usd, 4)}}
 
+    if ui:
+        import gradio as gr
+
+        from inbox_agent.ui import ReviewUI
+
+        review = ReviewUI(agent, store, budget, provider, settings, calendar_path, today, samples_dir)
+        app.state.ui = review
+        gr.mount_gradio_app(app, review.build(), path="/ui")
     return app
 
 

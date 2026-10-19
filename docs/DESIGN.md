@@ -252,5 +252,16 @@ and latency: never with message bodies. No CORS. `INBOX_FAKE_PROVIDER=1` swaps i
 the tool results and drives a plausible plan, for local checks of the API and UI without a key; it is never used for
 the evaluation.
 
+## Review UI
+`inbox_agent/ui.py` is a Gradio Blocks app mounted on the FastAPI app at `/ui` (`gr.mount_gradio_app`), built around the
+same singletons. Its callbacks are plain methods on `ReviewUI` (`handle`, `resolve`, `pending_rows`, `calendar_rows`,
+`recent`, `trace_rows`), so the tests exercise them directly with the fake provider; `build()` only wires them into
+components. The queue column re-renders per pending action with `gr.render`, so each row carries its own Approve and
+Reject buttons that call `Agent.resolve`, exactly as the API does; a state counter bumped after every handle or
+resolve refreshes the queue, the calendar expander and the header. The trace viewer lists tool calls only (tool, compact
+args, status, truncated result) and loop events such as a text finish or a rejected step, never model text. Cost is the
+measured list price for a priced model and "free tier" otherwise. The header shows the model, provider, today's calls
+and spend, and the caps the budget guard enforces; the footer states that the clinic is fictional and nothing is sent.
+
 ## Custom agent vs n8n
 _Milestone 5: when to use which._

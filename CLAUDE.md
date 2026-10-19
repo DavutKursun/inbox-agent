@@ -9,8 +9,8 @@ Section 0 says where we are and what changed from the original plan.
 **Milestones 1, 2 and 3 are done (M3 closed 2026-10-19: 120 reviewed scenarios, eval harness, three prompt versions on
 claude-haiku-5-5; v3: intent 0.892, unsafe (policy) 0, injection 0,
 escalation recall 1.000, unexpected escalations 18, $0.0015 per email).
-Milestone 4 step 1 (FastAPI endpoints with the approval queue) is done; next: "Milestone 4, step 2" below, after
-Davut's go.**
+Milestone 4 steps 1 (FastAPI endpoints) and 2 (Gradio review UI with the working approval queue) are done; next:
+"Milestone 4, step 3" below, after Davut's go.**
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
@@ -23,7 +23,7 @@ Implemented:
 - `data/kb/*.md` (9 pages, fictional Nova Dental Clinic), `scripts/make_fixtures.py --today 2026-10-19` (200 customers,
   calendar, 6 sample emails incl. an injection; seeded + dated, the date is kept in `data/fixtures_today.txt` and is the
   default `--today` of `scripts/run_one.py`)
-- `tests/` (71) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
+- `tests/` (76) with a ScriptedProvider that drives the loop end to end (booking → approval → execute; reject;
   cross-customer refusal; injection refusal; forbidden/invalid calls; max turns; citation flag; Anthropic conversion;
   queue-time checks; failed approvals; unfinished threads; truncation; budget caps; strict schemas; dated fixtures)
 - `inbox_agent/scenarios.py` (Scenario/Expected schema, JSONL I/O, sender check, override merge), `scripts/make_scenarios.py`
@@ -33,7 +33,9 @@ Implemented:
   runner; exit 3 on quota/budget), `scripts/eval_report.py` (table, README row, ten worst scenarios with trace links)
 - `app.py` (FastAPI app factory: /handle, /pending, /approve, /reject, /trace, /health; shared singletons; 413/422/429/503/404),
   `inbox_agent/fake_provider.py` (deterministic stand-in behind `INBOX_FAKE_PROVIDER=1`), `tests/test_app.py`
-- NOT yet: Gradio UI, Dockerfile + Space, integrations, n8n.
+- `inbox_agent/ui.py` (Gradio review UI at /ui: inbox, result + trace viewer, approval queue with per-row Approve / Reject,
+  calendar expander, header with budget, footer), `tests/test_ui.py` (callbacks with the fake provider + a headless smoke)
+- NOT yet: Dockerfile + Space, integrations, n8n.
 
 Hardening (2026-10-16, after a review of agent/tools/policy against §2 and §4; details in docs/DESIGN.md), three commits:
 - `3f7822d` M1 hardening (1/3): `pydantic[email]` (CI green), dated fixtures, sender-only `lookup_customer`, injection
@@ -100,12 +102,18 @@ provider, pending_count, budget. Shared singletons, request logging without bodi
 runs it without a key. Tests through the TestClient cover the booking flow (handle → pending → approve → calendar
 changed), reject, the error codes, trace retrieval and health. Run: `uvicorn app:app --port 7860`.
 
-**Milestone 4, step 2 (wait for Davut's go):** the Gradio review UI mounted on the same app (`gr.mount_gradio_app`): left the
-six sample emails plus "paste your own", middle the AgentResult and a thought-free trace viewer (tool / args / result per
-turn), right the approval queue with Approve / Reject buttons that call the same resolve path as the API. No real
-sending; max 2,000 characters; the budget guard applies. Tests with the fake provider where Gradio allows (the callback
-functions, not the browser). Then step 3: Dockerfile + Hugging Face Space (Docker, fake fixtures bundled, fresh copies
-per start) + a 60-second GIF. Stop after each step.
+**Milestone 4, step 2 (done 2026-10-19):** the Gradio review UI at `/ui` (`inbox_agent/ui.py`, mounted in `create_app`):
+Inbox (six samples + paste your own, Handle, last ten threads), Result (intent, summary, escalation, draft with citation
+chips and the unverified badge, tool-only trace viewer, tokens / cost / latency), Approval queue (per-row Approve /
+Reject through `Agent.resolve`, calendar expander for the next 14 days), header with model / provider / today's calls and
+spend / caps, footer. Tests: callbacks with the fake provider (handle → approve changes the calendar; reject leaves it;
+bad input refused) and a 10-second headless smoke (/health and /ui 200). Run: `INBOX_FAKE_PROVIDER=1 uvicorn app:app
+--port 7860` then open http://localhost:7860/ui.
+
+**Milestone 4, step 3 (wait for Davut's go):** Dockerfile (python:3.11-slim, requirements.txt, the fake CRM/calendar/KB
+bundled and rebuilt fresh at container start from `make_fixtures.py --today`, port 7860, `uvicorn app:app`), a Hugging Face
+Space (Docker SDK) with the key as a Space secret and the budget guard on, README badge + link, and a 60-second GIF of
+handle → queue → approve. Stop after the Dockerfile builds and runs locally, before pushing the Space.
 
 macOS notes: Python 3.11 venv; nothing heavy — no torch, no faiss.
 
