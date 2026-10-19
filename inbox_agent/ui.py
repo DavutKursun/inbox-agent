@@ -25,6 +25,7 @@ from .schema import AgentResult, Email, PendingAction
 from .store import Store
 
 PASTE = "paste your own"
+SAMPLE_ORDER = ("booking", "cancel", "question", "billing", "complaint", "injection")  # the demo order; others follow alphabetically
 REPO = "https://github.com/DavutKursun/inbox-agent"
 TRACE_HEADERS = ["turn", "tool", "args", "status", "result"]
 RECENT_HEADERS = ["thread", "intent", "escalated", "pending"]
@@ -62,7 +63,7 @@ class ReviewUI:
     # --- data for the panels ---------------------------------------------------------------
     def samples(self) -> dict[str, dict]:
         out = {}
-        for p in sorted(self.samples_dir.glob("*.json")):
+        for p in sorted(self.samples_dir.glob("*.json"), key=lambda p: (SAMPLE_ORDER.index(p.stem) if p.stem in SAMPLE_ORDER else len(SAMPLE_ORDER), p.stem)):
             try:
                 out[p.stem] = json.loads(p.read_text(encoding="utf-8"))
             except ValueError:
@@ -72,6 +73,14 @@ class ReviewUI:
     def pick_sample(self, name: str) -> tuple[str, str, str]:
         s = self.samples().get(name)
         return (s["from"], s["subject"], s["body"]) if s else ("", "", "")
+
+    def banner(self) -> str:
+        """A warning for the top of the page when no LLM is configured (the queue and traces still work)."""
+        if self.provider is not None:
+            return ""
+        return ("⚠️ **No LLM key configured.** Handle answers with an error and `POST /handle` with 503; approvals, traces and "
+                "the calendar still work. Set `LLM_API_KEY` (Groq) or `ANTHROPIC_API_KEY` with `LLM_PROVIDER=anthropic` as a "
+                "secret, or start with `INBOX_FAKE_PROVIDER=1` for a local check.")
 
     def header(self) -> str:
         spend = self.budget.read()
@@ -183,6 +192,7 @@ class ReviewUI:
         with gr.Blocks(title=f"{COMPANY} — inbox agent") as demo:
             refresh = gr.State(0)
             header = gr.Markdown(self.header())
+            gr.Markdown(self.banner(), visible=bool(self.banner()))
             with gr.Row():
                 with gr.Column(scale=1):
                     gr.Markdown("### Inbox")

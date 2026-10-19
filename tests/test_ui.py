@@ -34,13 +34,13 @@ def ui(tmp_path):
 
 
 def test_ui_builds_and_is_mounted(ui):
-    app, review, tmp, _ = ui
+    app, review, _tmp, _customers = ui
     assert isinstance(review, ReviewUI) and isinstance(review.build(), gr.Blocks)
     client = TestClient(app)
     r = client.get("/ui", follow_redirects=True)
     assert r.status_code == 200 and "gradio" in r.text.lower()
     names = list(review.samples())
-    assert names == ["billing", "booking", "cancel", "complaint", "injection", "question"] and review.pick_sample(PASTE) == ("", "", "")
+    assert names == ["booking", "cancel", "question", "billing", "complaint", "injection"] and review.pick_sample(PASTE) == ("", "", "")
     assert review.pick_sample("booking")[1] == "Check-up appointment"
     assert "fake-model" in review.header() and "daily cap 100 calls" in review.header()
 

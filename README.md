@@ -5,7 +5,9 @@ appointment slots, drafts a reply — and **asks a human before anything irrever
 fictional dental clinic, evaluated on 120 scenarios including prompt-injection attacks, and delivered
 twice: as a custom agent (FastAPI + Gradio) and as an n8n workflow, because clients ask for both.
 
-> **Live demo:** _Milestone 4_ · **n8n workflow:** `n8n/inbox-agent.json` (_Milestone 5_)
+> **Live demo:** Hugging Face Space `DavutKursun/inbox-agent` (Docker; see "Deploy") · **n8n workflow:** `n8n/inbox-agent.json` (_Milestone 5_)
+
+![demo: handle a booking, approve it in the queue, watch the slot appear](docs/img/demo.gif)
 
 ## Results (120 reviewed scenarios, claude-haiku-5-5 at list price, three prompt versions)
 
@@ -60,6 +62,17 @@ Errors: 422 invalid email, 413 body over 2,000 characters, 429 daily budget exha
 or thread. Interactive docs at `/docs`. The review UI at `/ui` has the sample inbox on the left, the result with a
 thought-free trace in the middle, and the approval queue on the right: Approve / Reject call the same resolve path as
 the API, and the calendar expander shows a slot appearing only after approval.
+
+## Deploy
+```bash
+docker build -t inbox-agent . && docker run --rm -p 7860:7860 -e INBOX_FAKE_PROVIDER=1 inbox-agent   # no key needed
+docker run --rm -p 7860:7860 -e LLM_API_KEY=gsk_... inbox-agent                                      # Groq, qwen/qwen3.8-27b
+```
+The image runs as a non-root user on port 7860, rebuilds the seeded CRM at start-up when it is missing, and keeps the
+budget guard at 150 calls and $1 per day. On a Hugging Face Docker Space (`space/README.md` holds the Space header) the
+`.env` file is never read: settings come from the Space's variables and secrets, runtime state lives in `/tmp`, and a
+missing key shows a banner in the UI and 503 on `/handle` instead of crashing. Record the GIF with
+`python scripts/demo_gif.py` (Playwright + Pillow, against a local fake-provider run).
 
 ## Repository
 `inbox_agent/` — schema, policy, tools, agent loop, providers (Groq/Cerebras + Claude tool calling), crm (SQLite),

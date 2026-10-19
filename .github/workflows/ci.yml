@@ -9,3 +9,18 @@ jobs:
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with: { dockerfile: Dockerfile }
+      - run: docker build -t inbox-agent .
+      - name: smoke (fake provider)
+        run: |
+          docker run -d --rm -p 7860:7860 -e INBOX_FAKE_PROVIDER=1 --name inbox inbox-agent
+          for i in $(seq 1 30); do curl -sf localhost:7860/health && break; sleep 2; done
+          curl -sf localhost:7860/health | grep -q '"status":"ok"'
+          curl -sfL localhost:7860/ui | grep -qi gradio
+          docker logs inbox | tail -5
+          docker stop inbox

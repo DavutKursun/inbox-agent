@@ -263,5 +263,16 @@ args, status, truncated result) and loop events such as a text finish or a rejec
 measured list price for a priced model and "free tier" otherwise. The header shows the model, provider, today's calls
 and spend, and the caps the budget guard enforces; the footer states that the clinic is fictional and nothing is sent.
 
+## Deployment
+One image (`python:3.11-slim`, core requirements only, non-root uid 1000, port 7860) serves the API and the UI. `data/`
+ships without the SQLite CRM, so `create_app` rebuilds the seeded fixtures on first start; everything the app writes
+(pending actions, traces, the budget file) goes under `data/runtime` and the working directory, or under `/tmp` on a
+Hugging Face Space, where `SPACE_ID` is set and `.env` is never read. The public Space is meant to run on the free Groq
+model with the budget guard at 150 calls and $1 per day; Haiku is a secret away (`LLM_PROVIDER=anthropic`). With no
+key at all the app still starts: the UI shows a banner, `/handle` answers 503, approvals and traces keep working. CI
+lints the Dockerfile with hadolint, builds the image and smoke-tests `/health` and `/ui` with the fake provider.
+`scripts/demo_gif.py` records `docs/img/demo.gif` (handle → trace → approve → calendar) with Playwright against a
+local fake-provider run on a temporary copy of `data/`.
+
 ## Custom agent vs n8n
 _Milestone 5: when to use which._

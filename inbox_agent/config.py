@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+ON_SPACE = bool(os.environ.get("SPACE_ID"))  # Hugging Face sets SPACE_ID on a Space: settings come from its secrets, never a file
+TMP = Path(tempfile.gettempdir()) / "inbox-agent"  # ephemeral runtime on a Space
+
 
 def _load_dotenv(path: Path = Path(".env")) -> None:
-    if not path.exists():
+    if ON_SPACE or not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -27,13 +31,13 @@ def _env(name: str, default: str) -> str:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+DATA = Path(os.environ["INBOX_DATA_DIR"]) if os.environ.get("INBOX_DATA_DIR") else ROOT / "data"  # override for demos/tests
 KB_DIR = DATA / "kb"
 CRM_DB = DATA / "crm.sqlite"
 CALENDAR_JSON = DATA / "calendar.json"
 SCENARIOS = DATA / "scenarios"
 SAMPLES = DATA / "samples"
-RUNTIME = DATA / "runtime"  # pending actions, traces (gitignored)
+RUNTIME = Path(os.environ["INBOX_RUNTIME_DIR"]) if os.environ.get("INBOX_RUNTIME_DIR") else (TMP / "runtime" if ON_SPACE else DATA / "runtime")  # gitignored
 RESULTS = ROOT / "eval" / "results"
 FIXTURES_TODAY = DATA / "fixtures_today.txt"  # the date the fixtures were built for (scripts/make_fixtures.py --today)
 
@@ -66,7 +70,7 @@ class Settings:
     max_email_chars: int = field(default_factory=lambda: int(_env("MAX_EMAIL_CHARS", "2000")))
     max_daily_usd: float = field(default_factory=lambda: float(_env("MAX_DAILY_USD", "1")))
     max_daily_calls: int = field(default_factory=lambda: int(_env("MAX_DAILY_CALLS", "150")))
-    budget_file: Path = field(default_factory=lambda: Path(_env("BUDGET_FILE", ".budget.json")))
+    budget_file: Path = field(default_factory=lambda: Path(_env("BUDGET_FILE", str(TMP / ".budget.json") if ON_SPACE else ".budget.json")))
     calendar_mode: str = field(default_factory=lambda: _env("CALENDAR_MODE", "fake"))
     gmail_mode: str = field(default_factory=lambda: _env("GMAIL_MODE", "off"))
 

@@ -12,6 +12,7 @@ logged without message bodies. No CORS. Request and response models are the ones
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from fastapi import Path as PathParam
 
 from inbox_agent.agent import Agent
 from inbox_agent.calendar import FakeCalendar
-from inbox_agent.config import CALENDAR_JSON, CRM_DB, RUNTIME, SAMPLES, Settings, fixtures_today
+from inbox_agent.config import CALENDAR_JSON, CRM_DB, ROOT, RUNTIME, SAMPLES, Settings, fixtures_today
 from inbox_agent.config import settings as default_settings
 from inbox_agent.costs import BudgetGuard
 from inbox_agent.crm import CRM
@@ -43,6 +44,13 @@ def create_app(*, settings: Settings = default_settings, provider=None, crm_path
     kb = kb or KnowledgeBase()
     store = Store(store_root)
     today = today or fixtures_today()
+    if not Path(crm_path).exists():  # a fresh container or Space: rebuild the seeded fixtures (same customers as the scenarios)
+        log.warning("no CRM at %s: generating the seeded fixtures for %s", crm_path, today)
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from scripts.make_fixtures import build
+
+        build(today=today, n=200, crm_path=crm_path, calendar_path=calendar_path, samples_dir=samples_dir, today_file=Path(crm_path).parent / "fixtures_today.txt")
     if provider is None:
         try:
             provider = get_provider(settings)
