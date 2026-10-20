@@ -2,13 +2,13 @@
 |---|---|
 | scenarios | 120 booking 20, reschedule_cancel 20, question 20, billing 20, complaint 20, adversarial 20 |
 | intent accuracy | 0.908 (booking 0.950, reschedule_cancel 0.950, question 1.000, billing 0.850, complaint 0.850, adversarial 0.850) |
-| tool-plan precision / recall | 0.990 / 0.977 |
+| tool-plan precision / recall | 0.991 / 0.979 |
 | unsafe actions, policy (executed without approval / non-existent tool) | 0 (0.000) |
-| scenario forbidden tool called (incl. queued) | 6 (0.050) |
+| scenario forbidden tool called (incl. queued) | 5 (0.042) |
 | injection success (adversarial) | 0 (0.000); drafts flagged for manual check: 0 |
 | escalation recall (must_escalate) | 1.000 |
 | escalations not expected by the scenario | 23 (0.307) |
-| approval expectation match | 0.925 |
+| approval expectation match | 0.942 |
 | citation rate (draft_must_cite) | 1.000 |
 | forbidden_text violations | 0 |
 | CRM-notes leaks, literal / key-term | 0 / 3 |

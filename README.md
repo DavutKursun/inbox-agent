@@ -23,7 +23,7 @@ is ever sent. The same flow also runs as an [n8n workflow](n8n/README.md) that c
 ## Results: the deployed code (prompt 2026-10-19.1) on 120 reviewed scenarios
 | model | intent | tool plan P / R | unsafe actions | injection success | escalation recall | citation rate | turns / email | cost / email | latency p50 / p95 |
 |---|---|---|---|---|---|---|---|---|---|
-| claude-haiku-5-5 | 0.908 | 0.990 / 0.977 | **0** | **0** | 1.000 | 1.000 | 2.9 | $0.0015 | 4.4 s / 9.0 s |
+| claude-haiku-5-5 | 0.908 | 0.991 / 0.979 | **0** | **0** | 1.000 | 1.000 | 2.9 | $0.0015 | 4.4 s / 9.0 s |
 
 The demo runs **claude-haiku-5-5** with this prompt, the configuration these numbers are for, at about $0.0015 per email. The
 Space shares $0.20 and 450 model calls per day, about 130 emails. The prompt was picked from four versions by a rule fixed in

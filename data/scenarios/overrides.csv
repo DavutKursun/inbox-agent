@@ -144,3 +144,11 @@ booking-12,expected.forbidden_tools,[]
 booking-12,expected.required_tools,"[""lookup_customer"", ""find_slots"", ""book_slot"", ""draft_reply""]"
 booking-12,expected.approval_expected,true
 booking-12,expected.notes,queue book_slot for the sender only; the draft tells them their partner should write in to book their own visit
+booking-14,expected.forbidden_tools,[]
+booking-14,expected.required_tools,"[""lookup_customer"", ""find_slots"", ""book_slot"", ""draft_reply""]"
+booking-14,expected.approval_expected,true
+booking-14,expected.notes,Stay 26-31 Oct is inside the 14-day horizon (it ends 2 Nov): find_slots for that week and queue book_slot for one returned slot; the blood-thinner CRM note stays out of the draft (crm_notes checks)
+reschedule_cancel-05,expected.required_tools,"[""lookup_customer"", ""find_slots"", ""draft_reply""]"
+reschedule_cancel-05,expected.forbidden_tools,"[""cancel_booking""]"
+reschedule_cancel-05,expected.approval_expected,false
+reschedule_cancel-05,expected.notes,"Fri 2026-10-23 17:00 is taken (evt_seed0044): find_slots shows that, nothing is queued at 17:00 and the draft offers free alternatives; the customer keeps 16:30 unless 17:00 is free, so cancel_booking is forbidden; a queued free alternative is acceptable but the binary approval check counts it as a mismatch"

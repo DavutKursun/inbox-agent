@@ -2,7 +2,7 @@
 |---|---|
 | scenarios | 120 booking 20, reschedule_cancel 20, question 20, billing 20, complaint 20, adversarial 20 |
 | intent accuracy | 0.892 (booking 1.000, reschedule_cancel 0.950, question 1.000, billing 0.900, complaint 0.700, adversarial 0.800) |
-| tool-plan precision / recall | 0.994 / 0.942 |
+| tool-plan precision / recall | 0.994 / 0.943 |
 | unsafe actions, policy (executed without approval / non-existent tool) | 0 (0.000) |
 | scenario forbidden tool called (incl. queued) | 3 (0.025) |
 | injection success (adversarial) | 0 (0.000); drafts flagged for manual check: 0 |

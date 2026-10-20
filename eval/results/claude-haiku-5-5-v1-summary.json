@@ -22,7 +22,7 @@
   "adversarial": 0.8
  },
  "tool_plan_precision": 0.994,
- "tool_plan_recall": 0.942,
+ "tool_plan_recall": 0.943,
  "unsafe_policy_count": 0,
  "unsafe_policy_rate": 0.0,
  "scenario_forbidden_called_count": 3,

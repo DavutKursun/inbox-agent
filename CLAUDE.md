@@ -4,9 +4,9 @@ This file is the build spec. Read it fully before writing code. Work milestone b
 milestone; after each milestone stop, show how to run it, and wait for Davut's OK.
 Section 0 says where we are and what changed from the original plan.
 
-## 0. Status (updated 2026-10-20)
+## 0. Status (updated 2026-10-21)
 
-**Project complete (2026-10-19).** Milestones 1 to 5 are done: tools, policy and fixtures; the agent loop on two providers; 120
+**Project complete (2026-10-19, closed out 2026-10-21).** Milestones 1 to 5 are done: tools, policy and fixtures; the agent loop on two providers; 120
 reviewed scenarios with the eval harness and four prompt versions on claude-haiku-5-5; FastAPI + Gradio review UI with a working
 approval queue, Docker image and the live Space https://huggingface.co/spaces/DavutKursun/inbox-agent; the Google Calendar
 adapter (mocked-client tests) and the n8n workflow (headless validation, see n8n/README.md); README on one screen. 93 tests
@@ -19,19 +19,21 @@ before the v4 run: unsafe 0 and injection 0 required, then the highest intent ac
 searching but scored intent 0.842, so `policy.CALL_LIMITS` is empty in the deployed code; the guard stays, tested with the cap
 switched on. Space variables: `LLM_PROVIDER=anthropic`, `ANTHROPIC_MODEL=claude-haiku-5-5`, `MAX_DAILY_USD=0.20`,
 `MAX_DAILY_CALLS=450`; past a cap the UI and the 429 say "Daily demo budget reached, try tomorrow."; the missing-key banner
-and the 503 name the configured provider's key. booking-12 corrected by Davut on 2026-10-19 (`data/scenarios/CHANGELOG.md`;
-v1 to v3 rescored from saved records). Results: `eval/results/claude-haiku-5-5-v1.*` to `-v4.*`, DESIGN.md "Findings".
+and the 503 name the configured provider's key. Three expectations corrected by Davut (booking-12 on 2026-10-19,
+booking-14 and reschedule_cancel-05 on 2026-10-21: `data/scenarios/CHANGELOG.md`; the saved runs rescored, no model calls).
+Results: `eval/results/claude-haiku-5-5-v1.*` to `-v4.*`, DESIGN.md "Findings".
 
-Manual-only items left (they need Davut's accounts or a decision):
-- Add the Anthropic key as the Space secret `ANTHROPIC_API_KEY`; until then the live demo's Handle shows a banner and
-  `/handle` answers 503.
-- Decide two scenario expectations that look wrong (DESIGN.md "Findings"): booking-14 (its dates are inside the 14-day
-  horizon) and reschedule_cancel-05 (the requested 17:00 is taken in the fixtures); neither changes the deployed version.
+**Close-out (2026-10-21).** `ANTHROPIC_API_KEY` is set on the Space and the unused Groq variables are removed. Live check
+passed: `/health` shows provider anthropic and claude-haiku-5-5; the booking sample queued a slot, `/approve` executed it and
+the UI calendar shows it; the injection sample queued nothing and was escalated. Two emails cost $0.004 (8 model calls).
+
+Manual-only items left (they need Davut's accounts):
 - Live Google Calendar: OAuth client JSON in `.secrets/`, `python -m integrations.gcal auth`, a run with `CALENDAR_MODE=google`
   on a test calendar, README screenshots.
 - n8n live run: Gmail OAuth2 and Telegram credentials, a public decision webhook URL and token, then the 60-second GIF.
-- Gmail drafts as the safe send (not built), the qwen 120-scenario run on the free-tier quota (~1M tokens, daily batches),
-  a held-out scenario set (the prompts were tuned on the 120), and the gpt-oss comparison row.
+- Gmail drafts as the safe send (not built).
+- A held-out scenario set (the prompts were tuned on the 120).
+- The qwen comparison run on the 120 scenarios (free-tier quota, ~1M tokens, daily batches).
 
 Implemented:
 - `inbox_agent/config.py`, `schema.py` (Email, tool arg models, ToolEvent, PendingAction, AgentResult),
